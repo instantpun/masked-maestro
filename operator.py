@@ -53,7 +53,7 @@ def run_subprocess(cmd, **kwargs):
         print("WARN: Process \'{}\' terminated with code {}".format(cmd[0], proc.returncode) + "\n")
     err = proc.stderr.read()
     if err:
-        print("WARN: Received error output: {}".format(err)
+        print("WARN: Received error output: {}".format(err))
 
 
 
@@ -727,9 +727,6 @@ def enforce_desired_state(current_state):
             # all 3 readiness conditions are true, thus env is 'ready'
             # so skip to next env in loop
             continue
-        else:
-            # env is 'ready', so do nothing
-            pass
 
     return
 
