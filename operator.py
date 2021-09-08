@@ -56,75 +56,6 @@ def run_subprocess(cmd, **kwargs):
         print("WARN: Received error output: {}".format(err)
 
 
-# Read in cluster list from configuration file, parse to create list and remove hidden characters such as new line
-def get_inventory(path) -> dict:
-    """
-    Load file defined in 'path' and parse as yaml.
-
-    :param path: The full path to the config file formatted as yaml
-    :type: str
-
-    :return cluster_map: the dictionary representation of the yaml file provided in path
-    :type: dict
-    """
-    # validate that path is in fact a string, and fail with AssertionError if it is not
-    assert isinstance(path, str), "func: get_inventory(), param: path, path must be of type str()"
-    # validate yaml file extension
-    assert (path.endswith('.yaml') or path.endswith('.yml')), "func: get_inventory(), param: path, path must be a yaml file with .yaml or .yml file extension!"
-
-    # load config from 'path' variable
-    with open(path, 'r') as f:
-        # safe_load() is more secure; the parser won't evaluate code snippets inside yaml
-        # safe_load() reads the file stream and converts yaml formatted text to a python dict() object
-        cluster_map = yaml.safe_load(f)
-
-    print("Clusters in Configuration: ")
-    print(", ".join(cluster_map['clusters'].keys())) # dict.keys() returns an iterable list of key names
-    return cluster_map
-
-def set_cluster_map(config=None) -> dict:
-    """
-    Parses dict() of inventory config, and creates an index of environment->cluster data mappings
-
-    :return env_cluster_map: The mapping of environment names to cluster names and config. Represents an indexing of 'shared_env' fields from the yaml inventory file.
-    :type: dict
-    """
-
-    # if config param empty or None/null, fetch and assign inventory data automatically
-    if not config:
-        config = get_inventory(INVENTORY_PATH)
-
-    # validation of config param
-    assert isinstance(config, dict), "func: gen_cluster_map(), param: config, variable 'config' must be of type dict()."
-    assert config.get('clusters'), "func: gen_cluster_map(), param: config, unable to assign value to variable 'config'. Provided dict() has no key named 'clusters'."
-    # ignore other top-level config, and only use the key-value tree nest inside the top-level 'clusters' key
-    clusters = config.get('clusters').keys()
-
-    # acceptable list of env names:
-    sharedEnvs = ['dev','qa','cap','psp','prod']
-
-    # initialize empty to dict() for index of envs
-    activeClusters = {}
-
-    for cluster in clusters:
-        # if cluster has active=true in yaml, and shared_env=$env is valid, begin processing
-        if config['clusters'][cluster].get('active') is True and config['clusters'][cluster].get('shared_env'):
-            # emit error if the provided env is not correct/acceptable
-            assert config['clusters'][cluster]['shared_env'] in sharedEnvs, "ERROR: @ file {inventory}, key clusters.{cluster}.shared_env does not have expected value. Must be one of {envs}".format(inventory=INVENTORY_PATH, cluster=cluster, envs=", ".join(sharedEnvs))
-
-            # edge case:
-            # activeClusters does not contain a key matching the value of config[cluster]['shared_env'], e.g. 'dev' or 'qa'
-            # therefore, we populate a new key-value tree into activeClusters  e.g. { 'dev': { 'clusters' : { 'sat-ocp-dev': dict() } } }
-            if not activeClusters.get( config['clusters'][cluster].get('shared_env') ):
-                activeClusters.update({ config['clusters'][cluster].get('shared_env') : { 'clusters': {cluster: dict() } } })
-                # Note: the dict() stored at activeClusters['dev']['clusters']['sat-ocp-dev'] is empty and will be populated later in the code
-
-            # general case:
-            # existing key path activeClusters[env]['clusters'] contains a dict(), so we add a new entry; e.g. { 'sat-ocp-dev': dict() }
-            else:
-                activeClusters[ config['clusters'][cluster].get('shared_env') ]['clusters'].update( {cluster: dict() } )
-
-    return activeClusters
 
 
 def deploy_cert(cert=None, key=None, cluster_name=None, cluster_token=None, from_master=False):
@@ -481,8 +412,90 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
 
     return existing_certs
 
+# Read in cluster list from configuration file, parse to create list and remove hidden characters such as new line
+def get_inventory(path) -> dict:
+    """
+    Load file defined in 'path' and parse as yaml.
 
-def init_default_state():
+    :param path: The full path to the config file formatted as yaml
+    :type: str
+
+    :return inventory: the dictionary representation of the yaml file provided in path
+    :type: dict
+    """
+    # validate that path is in fact a string, and fail with AssertionError if it is not
+    assert isinstance(path, str), "func: get_inventory(), param: path, path must be of type str()"
+    # validate yaml file extension
+    assert (path.endswith('.yaml') or path.endswith('.yml')), "func: get_inventory(), param: path, path must be a yaml file with .yaml or .yml file extension!"
+
+    # load config from 'path' variable
+    with open(path, 'r') as f:
+        # safe_load() is more secure; the parser won't evaluate code snippets inside yaml
+        # safe_load() reads the file stream and converts yaml formatted text to a python dict() object
+        inventory = yaml.safe_load(f)
+
+    print("Clusters in Configuration: ")
+    print(", ".join(inventory['clusters'].keys())) # dict.keys() returns an iterable list of key names
+    return inventory
+
+def get_initial_state(config=None) -> dict:
+    """
+    Parses dict() of inventory config, and creates an index of environment->cluster data mappings
+
+    :return initial_env_state: The mapping of environment names to cluster names and config. Represents an indexing of 'shared_env' fields from the yaml inventory file.
+    :type: dict
+    """
+
+    # if config param empty or None/null, fetch and assign inventory data automatically
+    if not config:
+        config = get_inventory(INVENTORY_PATH)
+
+    # validation of config param
+    assert isinstance(config, dict), "func: gen_cluster_map(), param: config, variable 'config' must be of type dict()."
+    assert config.get('clusters'), "func: gen_cluster_map(), param: config, unable to assign value to variable 'config'. Provided dict() has no key named 'clusters'."
+    # ignore other top-level config, and only use the key-value tree nest inside the top-level 'clusters' key
+    clusters = config.get('clusters').keys()
+
+    # acceptable list of env names:
+    sharedEnvs = ['dev','qa','cap','psp','prod']
+
+    # initialize empty to dict() for index of envs
+    initial_env_state = {}
+
+    for cluster in clusters:
+        # if cluster has active=true in yaml, and shared_env=$env is valid, begin processing
+        if config['clusters'][cluster].get('active') is True and config['clusters'][cluster].get('shared_env'):
+            # emit error if the provided env is not correct/acceptable
+            assert config['clusters'][cluster]['shared_env'] in sharedEnvs, "ERROR: @ file {inventory}, key clusters.{cluster}.shared_env does not have expected value. Must be one of {envs}".format(inventory=INVENTORY_PATH, cluster=cluster, envs=", ".join(sharedEnvs))
+
+            # edge case:
+            # initial_env_state does not contain a key matching the value of config[cluster]['shared_env'], e.g. 'dev' or 'qa'
+            # therefore, we populate a new key-value tree into initial_env_state  e.g. { 'dev': { 'clusters' : { 'sat-ocp-dev': dict() } } }
+            if not initial_env_state.get( config['clusters'][cluster].get('shared_env') ):
+                initial_env_state.update({ config['clusters'][cluster].get('shared_env') : { 'clusters': {cluster: dict() } } })
+                # Note: the dict() stored at initial_env_state['dev']['clusters']['sat-ocp-dev'] is empty and will be populated later in the code
+
+            # general case:
+            # existing key path initial_env_state[env]['clusters'] contains a dict(), so we add a new entry; e.g. { 'sat-ocp-dev': dict() }
+            else:
+                initial_env_state[ config['clusters'][cluster].get('shared_env') ]['clusters'].update( {cluster: dict() } )
+
+    return initial_env_state
+
+def create_uuid() -> str:
+    """
+    generates and returns a new, 6-character UUID 
+
+    :return UUID: string containing 6 random alphanumeric characters
+    :type: str
+    """
+    UUIDtmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
+    # enforce alphanumeric chars in UUID: strip any character that does not occur in the set [A-Za-z0-9]
+    UUID = re.sub('[^A-Za-z0-9]+', '', UUIDtmp)
+    
+    return UUID
+
+def init_default_state(config):
 
     ####################################################
     # sample structure of 'current_state':
@@ -491,14 +504,14 @@ def init_default_state():
     #    {
     #     'clusters':
     #       {
-    #        'sat-ocp-dev':
+    #        'dev1':
     #          {
     #           'existing_cert': str(), # default = None, should be str()
     #           'valid_age': bool() # default = False ... may need default = None???
     #           'matches_master': bool() # default = False 
     #           ...
     #          },
-    #        'sat-ocp-sandbox': { ... }
+    #        'sandbox': { ... }
     #       },
     #     'master_cert': str(), # raw cert contents
     #     'master_key': str(), # raw key contents 
@@ -519,8 +532,7 @@ def init_default_state():
     #  ...
     # }
     #
-    config = get_inventory(INVENTORY_PATH)
-    default_state = set_cluster_map(config)
+    default_state = get_initial_state(config)
     globals = dict()
     globals['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
 
@@ -582,11 +594,11 @@ def enforce_desired_state(current_state):
             print("Master Cert or Key not set, attempting to re-use existing from clusters in current env. env={}".format(env))
 
             # recursively attempt to fetch a valid cert from one of the current cluster states in current_state{}
-            for cluster in clusters:
+            for cluster in current_state[env]['clusters']:
                 # 'existing_cert' contains the name of the secret which contains the certificate and key
                 secret_name = current_state[env]['clusters'][cluster]['existing_cert']
                 valid = current_state[env]['clusters'][cluster]['valid_age']
-                if cert is not None and valid:
+                if current_state[env]['clusters'][cluster]['existing_cert'] is not None and valid:
                     current_state[env]['master_cert'] = fetch_cert_from_secret(secret_name) #TODO 
                     current_state[env]['master_key'] = fetch_key_from_secret(secret_name) #TODO
                     break
@@ -613,7 +625,7 @@ def enforce_desired_state(current_state):
 
         ######## (2.1) Compare cluster certs to master_cert for current env ########
         for cluster in current_state[env]['clusters']:
-            cluster_cert = fetch_cert_from_secret( current_state[env]['clusters'][cluster]['existing_cert'] )
+            cluster_cert = fetch_cert_from_secret( current_state[env]['clusters'][cluster]['existing_cert'] ) # TODO
             
             if cluster_cert == current_state[env]['master_cert']:
                 current_state[env]['clusters'][cluster]['matches_master'] = True
@@ -718,33 +730,36 @@ def enforce_desired_state(current_state):
         else:
             # env is 'ready', so do nothing
             pass
-                
 
     return
 
 
-def gen_certs():
-    """
-    gen_certs is an idempotent function which ensures the cluster certificates are generated and installed
-    """
-    print("CERT VALIDATION")
-    # if the directory specified in WORKING_DIR does not exist, create it, else do nothing.
-    if not os.path.isdir(WORKING_DIR):
-        os.mkdir(WORKING_DIR)
-    fileUUIDtmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
-    fileUUID = re.sub('[^A-Za-z0-9]+', '', fileUUIDtmp)
+# def gen_certs():
+#     """
+#     gen_certs is an idempotent function which ensures the cluster certificates are generated and installed
+#     """
 
-    #
-    config = get_inventory(INVENTORY_PATH)
+#     print("CERT VALIDATION")
+#     # if the directory specified in WORKING_DIR does not exist, create it, else do nothing.
+#     if not os.path.isdir(WORKING_DIR):
+#         os.mkdir(WORKING_DIR)
+#     fileUUIDtmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
+#     # enforce alphanumeric chars in UUID: strip any character that does not occur in the set [A-Za-z0-9]
+#     fileUUID = re.sub('[^A-Za-z0-9]+', '', fileUUIDtmp)
 
-    # use get_cluster_map() as a basis for data model
-    current_state = get_cluster_map(config)
+#     #
+#     config = get_inventory(INVENTORY_PATH)
+
+#     # use get_cluster_map() as a basis for data model
+#     current_state = get_initial_state(config)
 
 def main():
     global current_state
-    default_state = init_default_state()
+    config = get_inventory(INVENTORY_PATH)
+    default_state = init_default_state(config)
     current_state = enforce_desired_state(default_state)
 
+    # possible one-liner = enforce_desired_state(init_default_state(get_inventory(INVENTORY_PATH)))
     # TODO: Implement control loop...
     
     # retry_counter = 0 # self-terminate if failed 5 times
