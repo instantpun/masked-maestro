@@ -167,7 +167,6 @@ def deploy_cert(cert=None, key=None, from_master=False, cluster_name=None, clust
 
 def delete_ss_pod(cluster_name=None, cluster_token=None):
 
-
     delCmd = " ".join([ "oc delete pod",
                          "-l name=sealed-secrets-controller",
                          "--token={}".format(cluster_token),
@@ -183,6 +182,12 @@ def delete_ss_pod(cluster_name=None, cluster_token=None):
 
 
 def is_valid_age(age) -> bool:
+    """
+    :param age: A string which should match the pattern '[0-9][0-9][0-9][ydms]'
+    :type: str
+
+    :return bool: True/False based on evaluation of age parameter
+    """
 
     # age must be a string at this time
     assert isinstance(age, str), "func: is_valid_age(), param: age, age must be of type str()"
@@ -325,7 +330,7 @@ def create_new_cert():
     """
     Calls openssl tool to create a new certificate and key
 
-    :returns (cert, key): TODO
+    :returns (cert, key): Tuple containing the plaintext x509 certificate and the plaintext pem-formatted key
     
     :type: tuple(str, str)
     """
