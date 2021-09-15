@@ -22,9 +22,6 @@ RETRY_LIMIT = int(os.environ.get('RETRY_LIMIT')) if os.environ.get('RETRY_LIMIT'
 # wildcard domain for clusters
 WILDCARD_DOMAIN = "" if not os.environ.get('WILDCARD_DOMAIN') else os.environ.get('WILDCARD_DOMAIN')
 
-# initialize the Flask app object
-# app = Flask(__name__)
-
 old_print = print
 
 def timestamped_print(*args, **kwargs):
@@ -55,20 +52,52 @@ def run_subprocess(cmd, **kwargs):
     if err:
         print("WARN: Received error output: {}".format(err))
 
+# Read in cluster list from configuration file, parse to create list and remove hidden characters such as new line
 
 
 
-def deploy_cert(cert=None, key=None, cluster_name=None, cluster_token=None, from_master=False):
+def yaml_file_to_dict(path) -> dict:
+    """
+    Load file defined in 'path' and parse as yaml.
+
+    :param path: The full path to the config file formatted as yaml
+    :type: str
+
+    :return inventory: the dictionary representation of the yaml file provided in path
+    :type: dict
+    """
+    # validate that path is in fact a string, and fail with AssertionError if it is not
+    assert isinstance(path, str), "func: get_inventory(), param: path, path must be of type str()"
+    # validate yaml file extension
+    assert (path.endswith('.yaml') or path.endswith('.yml')), "func: get_inventory(), param: path, path must be a yaml file with .yaml or .yml file extension!"
+
+    # load config from 'path' variable
+    with open(path, 'r') as f:
+        # safe_load() is more secure; the parser won't evaluate code snippets inside yaml
+        # safe_load() reads the file stream and converts yaml formatted text to a python dict() object
+        d = yaml.safe_load(f)
+
+    print("Clusters in Configuration: ")
+    print(", ".join(d['clusters'].keys())) # dict.keys() returns an iterable list of key names
+    return d
+
+def deploy_cert(cert=None, key=None, from_master=False, cluster_name=None, cluster_token=None):
     """
     Checks for any existing sealed secret certs inside a specific cluster
+
+    :param cert: The raw TLS certificate, which will be included in the k8s secret
+    :type: str
+
+    :param key: The raw pem-formatted key associated with cert, which will be included in the k8s secret
+    :type: str
+
+    :param from_master: If True, deploy_cert() will attempt to create a k8s secret using the master_cert and master_key stored in-memory
+    :type: bool
 
     :param cluster_name: must correspond to one of the name aliases defined in the inventory file
     :type: str
 
     :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
-    :type: str
-
-    :return cert: 
     :type: str
     """
     
@@ -87,8 +116,8 @@ def deploy_cert(cert=None, key=None, cluster_name=None, cluster_token=None, from
     if not cluster_token:
         cluster_token = os.environ.get( cluster_name.replace('-','_').upper() )
     
-    tls_signer_secret = k8s_secret_tls_template
-    tls_signer_secret['metadata']['name'] = "sealing-secret-" + fileUUID
+    tls_signer_secret = yaml_file_to_dict('k8s_templates/secret_tls.yaml')
+    tls_signer_secret['metadata']['name'] = "sealing-secret-" + create_uuid()
 
     # cert must be in standard PEM format
     tls_signer_secret['data']['tls.crt'] = current_state['master_cert'] if from_master else cert
@@ -97,8 +126,7 @@ def deploy_cert(cert=None, key=None, cluster_name=None, cluster_token=None, from
     tls_signer_secret['data']['tls.key'] = current_state['master_key']  if from_master else key
 
     # set custom labels
-    labels = { "operator": "managed",
-               "sealedsecrets.bitnami.com/sealed-secrets-key": "true"
+    labels = { "sealedsecrets.bitnami.com/sealed-secrets-key": "active"
             }
 
     # add labels to template
@@ -115,7 +143,7 @@ def deploy_cert(cert=None, key=None, cluster_name=None, cluster_token=None, from
     
     # setup process
     deployCmd = " ".join([ "oc create secret",
-                         cert_name,
+                         cert,
                          "--token={}".format(cluster_token),
                          "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
                          "--insecure-skip-tls-verify",
@@ -417,31 +445,6 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
 
     return existing_certs
 
-# Read in cluster list from configuration file, parse to create list and remove hidden characters such as new line
-def get_inventory(path) -> dict:
-    """
-    Load file defined in 'path' and parse as yaml.
-
-    :param path: The full path to the config file formatted as yaml
-    :type: str
-
-    :return inventory: the dictionary representation of the yaml file provided in path
-    :type: dict
-    """
-    # validate that path is in fact a string, and fail with AssertionError if it is not
-    assert isinstance(path, str), "func: get_inventory(), param: path, path must be of type str()"
-    # validate yaml file extension
-    assert (path.endswith('.yaml') or path.endswith('.yml')), "func: get_inventory(), param: path, path must be a yaml file with .yaml or .yml file extension!"
-
-    # load config from 'path' variable
-    with open(path, 'r') as f:
-        # safe_load() is more secure; the parser won't evaluate code snippets inside yaml
-        # safe_load() reads the file stream and converts yaml formatted text to a python dict() object
-        inventory = yaml.safe_load(f)
-
-    print("Clusters in Configuration: ")
-    print(", ".join(inventory['clusters'].keys())) # dict.keys() returns an iterable list of key names
-    return inventory
 
 def get_initial_state(config=None) -> dict:
     """
@@ -494,11 +497,11 @@ def create_uuid() -> str:
     :return UUID: string containing 6 random alphanumeric characters
     :type: str
     """
-    UUIDtmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
+    uuidTmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
     # enforce alphanumeric chars in UUID: strip any character that does not occur in the set [A-Za-z0-9]
-    UUID = re.sub('[^A-Za-z0-9]+', '', UUIDtmp)
+    uuid = re.sub('[^A-Za-z0-9]+', '', uuidTmp)
     
-    return UUID
+    return uuid
 
 def init_default_state(config):
 
