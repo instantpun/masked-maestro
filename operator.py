@@ -608,7 +608,7 @@ def enforce_desired_state(current_state):
             # if no valid cert is retrieved, generate a new one
             try:
                 # master_cert and master_key are created as a pair... if one exists, but not the other, we will overwrite both with a new pair
-                current_state[env]['master_cert'], current_state[env]['master_key'] = created_new_cert()
+                current_state[env]['master_cert'], current_state[env]['master_key'] = create_new_cert()
                 
                 # validate master_cert and master_key MUST NOT be empty strings or None
                 assert current_state[env]['master_key'] is True, "Missing Value: Empty string or null value @ key = current_state[{}]['master_key']".format(env)
