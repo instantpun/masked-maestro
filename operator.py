@@ -1,11 +1,11 @@
 import threading
 from datetime import datetime
 #from flask import Flask,render_template,request,send_from_directory
-from base64 import urlsafe_b64encode
+from base64 import urlsafe_b64encode, b64decode
 import sys
 import os
 import re
-import yaml
+import yaml, json
 from contextlib import contextmanager
 import subprocess
 
@@ -62,13 +62,13 @@ def deploy_cert(cert=None, key=None, cluster_name=None, cluster_token=None, from
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param cluster_name: TODO
+    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
     :type: str
 
-    :param cluster_token: TODO
+    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
 
-    :return cert_name: TODO
+    :return cert: 
     :type: str
     """
     
@@ -184,17 +184,17 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
     """
     Check if the provided cert is more than 100days old
 
-    :param cert_name: TODO
+    :param secret_name: name of the secret which will be examined
     :type: str
 
-    :param cluster_name: TODO
+    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
     :type: str
 
-    :param cluster_token: TODO
+    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
 
-    :return cert_valid: TODO
-    :type: bool
+    :return secret_age: the age of the secret resource which matches the provided parameters. 'age' is a string which should match the pattern '[0-9][0-9][0-9][ydms]'
+    :type: str
     """
 
     print("Checking age of {}".format(secret_name))
@@ -241,21 +241,21 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
 
     return secret_age
 
-def fetch_cert(cert_name, cluster_name=None, cluster_token=None) -> str:
+def fetch_cert_key_from_secret(secret_name, cluster_name=None, cluster_token=None) -> str:
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param cluster_name: TODO
+    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
     :type: str
 
-    :param cluster_token: TODO
+    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
 
-    :return cert: TODO
-    :type: str
+    :return cert_key: TODO
+    :type: tuple(str, str)
     """
-    if not isinstance(cert_name, str):
-        cert_name = str(cert_name) # enforce str() typing
+    if not isinstance(secret_name, str):
+        secret_name = str(secret_name) # enforce str() typing
 
     # cluster_token is the auth token stored inside a shell variable
     # variable is exported by running the secrets_export.sh script
@@ -272,28 +272,33 @@ def fetch_cert(cert_name, cluster_name=None, cluster_token=None) -> str:
     # 1. destination api server
     # 2. auth token
     certCmd = " ".join([ "oc get secret",
-                         cert_name,
+                         secret_name,
                          "-o json",
                          "--token={}".format(cluster_token),
                          "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
                          "--insecure-skip-tls-verify",
-                         "--namespace sealed-secrets",
-                         "| jq -r \'.data.\"tls.crt\"\'",
-                         "| base64 -d"
+                         "--namespace sealed-secrets"
+                        #  "| jq -r \'.data.\"tls.crt\"\'",
+                        #  "| base64 -d"
                        ])
 
     # spawn process to run oc command, and send output to stdout
     with run_subprocess(certCmd) as proc:
         # read command output from stdout, returns str()
-        cert = proc.stdout.read()
+        secret = json.loads( proc.stdout.read() )
+    
+    #schema validation
+    #assert secret.get('type') == 'kubernetes.io/tls', "func: fetch_cert_key_from_secret - field 'type' in secret must be 'kubernetes.io/tls'"
 
-    return cert
+    cert_key = ( b64decode( secret['data']['tls.crt'] ), b64decode( secret['data']['tls.key'] ) )
+    return cert_key
 
 def create_new_cert():
     """
     Calls openssl tool to create a new certificate and key
 
     :returns (cert, key): TODO
+    
     :type: tuple(str, str)
     """
 
@@ -361,10 +366,10 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param cluster_name: TODO
+    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
     :type: str
 
-    :param cluster_token: TODO
+    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
 
     :return existing_certs: TODO
@@ -391,7 +396,7 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
     # 2. auth token
     cmd = " ".join(["oc get secrets",
                     "--sort-by=.metadata.creationTimestamp",
-                    "-o jsonpath='{.items[:].metadata.name}'",
+                    '-o jsonpath=\'{.items[:].metadata.name}\'',
                     "-l operator=managed",
                     "--namespace sealed-secrets",
                     "--insecure-skip-tls-verify",
@@ -599,8 +604,9 @@ def enforce_desired_state(current_state):
                 secret_name = current_state[env]['clusters'][cluster]['existing_cert']
                 valid = current_state[env]['clusters'][cluster]['valid_age']
                 if current_state[env]['clusters'][cluster]['existing_cert'] is not None and valid:
-                    current_state[env]['master_cert'] = fetch_cert_from_secret(secret_name) #TODO 
-                    current_state[env]['master_key'] = fetch_key_from_secret(secret_name) #TODO
+                    master_cert, master_key = fetch_cert_key_from_secret(secret_name, cluster_name=cluster)
+                    current_state[env]['master_cert'] = master_cert
+                    current_state[env]['master_key'] = master_key
                     break
                 else:
                     continue
@@ -625,7 +631,8 @@ def enforce_desired_state(current_state):
 
         ######## (2.1) Compare cluster certs to master_cert for current env ########
         for cluster in current_state[env]['clusters']:
-            cluster_cert = fetch_cert_from_secret( current_state[env]['clusters'][cluster]['existing_cert'] ) # TODO
+            secret_name = current_state[env]['clusters'][cluster]['existing_cert']
+            cluster_cert = fetch_cert_key_from_secret( secret_name, cluster_name=cluster )[0]
             
             if cluster_cert == current_state[env]['master_cert']:
                 current_state[env]['clusters'][cluster]['matches_master'] = True
@@ -647,15 +654,15 @@ def enforce_desired_state(current_state):
       
         # dict() of cluster->'existing_cert' value mappings in current env 
         # sample data: { 'sat-ocp-dev': '-----BEGIN CERTIFICATE-----....', ... }
-        existing_cert_results = { cluster : current_state[env]['clusters'][cluster]['existing_cert'] for cluster in clusters }
+        existing_cert_results = { cluster : current_state[env]['clusters'][cluster]['existing_cert'] for cluster in current_state[env]['clusters'] }
 
         # dict() of cluster->True/False value mappings in current env 
         # sample data: { 'sat-ocp-dev': False, ... }
-        valid_age_results = { cluster: current_state[env]['clusters'][cluster]['valid_age'] for cluster in clusters }
+        valid_age_results = { cluster: current_state[env]['clusters'][cluster]['valid_age'] for cluster in current_state[env]['clusters'] }
         
         # dict() of cluster->True/False value mappings after comparing each entry in existing_cert_results to the 'master_cert' for env
         
-        matched_cert_results = { cluster: current_state[env]['clusters'][cluster]['matches_master'] for cluster in clusters }
+        matched_cert_results = { cluster: current_state[env]['clusters'][cluster]['matches_master'] for cluster in current_state[env]['clusters'] }
 
         # set boolean flags for conditions 1 & 2 & 3 above
         # note: applying all() to a list[] is the same as writing the boolean expression 'list[0] and list[1] and ... and list[n]'
