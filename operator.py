@@ -67,9 +67,9 @@ def yaml_file_to_dict(path) -> dict:
     :type: dict
     """
     # validate that path is in fact a string, and fail with AssertionError if it is not
-    assert isinstance(path, str), "func: get_inventory(), param: path, path must be of type str()"
+    assert isinstance(path, str), "func: yaml_file_to_dict(), param: path, path must be of type str()"
     # validate yaml file extension
-    assert (path.endswith('.yaml') or path.endswith('.yml')), "func: get_inventory(), param: path, path must be a yaml file with .yaml or .yml file extension!"
+    assert (path.endswith('.yaml') or path.endswith('.yml')), "func: yaml_file_to_dict(), param: path, path must be a yaml file with .yaml or .yml file extension!"
 
     # load config from 'path' variable
     with open(path, 'r') as f:
@@ -461,7 +461,7 @@ def get_initial_state(config=None) -> dict:
 
     # if config param empty or None/null, fetch and assign inventory data automatically
     if not config:
-        config = get_inventory(INVENTORY_PATH)
+        config = yaml_file_to_dict(INVENTORY_PATH)
 
     # validation of config param
     assert isinstance(config, dict), "func: gen_cluster_map(), param: config, variable 'config' must be of type dict()."
@@ -760,18 +760,18 @@ def enforce_desired_state(current_state):
 #     fileUUID = re.sub('[^A-Za-z0-9]+', '', fileUUIDtmp)
 
 #     #
-#     config = get_inventory(INVENTORY_PATH)
+#     config = yaml_file_to_dict(INVENTORY_PATH)
 
 #     # use get_cluster_map() as a basis for data model
 #     current_state = get_initial_state(config)
 
 def main():
     global current_state
-    config = get_inventory(INVENTORY_PATH)
+    config = yaml_file_to_dict(INVENTORY_PATH)
     default_state = init_default_state(config)
     current_state = enforce_desired_state(default_state)
 
-    # possible one-liner = enforce_desired_state(init_default_state(get_inventory(INVENTORY_PATH)))
+    # possible one-liner = enforce_desired_state(init_default_state(yaml_file_to_dict(INVENTORY_PATH)))
     # TODO: Implement control loop...
     
     # retry_counter = 0 # self-terminate if failed 5 times
