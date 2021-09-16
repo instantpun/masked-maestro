@@ -396,12 +396,12 @@ def create_new_cert():
     return cert.decode('utf-8'), priv_key.decode('utf-8')
 
 
-def get_cluster_creds(env=None, cluster_name=None) -> dict:
+def get_cluster_creds(current_state, env=None, cluster_name=None) -> dict:
     """
     """
     # assert current_state
     assert cluster_name and isinstance(cluster_name, str), "func: get_cluster_creds, param: cluster_name -- 'cluster_name' must be a non-empty string"
-
+    print("inside get_cluster_creds, current_state:\n" + str(current_state) )
     creds = dict()
 
     # apiserver_token is the auth token stored inside a shell variable
@@ -468,7 +468,7 @@ def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=No
     return existing_certs
 
 
-def get_initial_state(config=None) -> dict:
+def config_to_state(config=None) -> dict:
     """
     Parses dict() of inventory config, and creates an index of environment->cluster data mappings
 
@@ -476,6 +476,7 @@ def get_initial_state(config=None) -> dict:
     :type: dict
     """
 
+    print('Building initial state from inventory...')
     # if config param empty or None/null, fetch and assign inventory data automatically
     if not config:
         config = yaml_file_to_dict(INVENTORY_PATH)
@@ -510,6 +511,10 @@ def get_initial_state(config=None) -> dict:
             else:
                 initial_env_state[ config['clusters'][cluster].get('shared_env') ]['clusters'].update( {cluster: dict() } )
 
+            # populate the apiserver_url field for the current cluster using the inventory file
+            assert config['clusters'][cluster].get('apiserver_url'), "apiserver_url field is missing"
+            initial_env_state[ config['clusters'][cluster].get('shared_env') ]['clusters'][cluster]['apiserver_url'] = config['clusters'][cluster].get('apiserver_url')
+
     return initial_env_state
 
 def create_uuid() -> str:
@@ -527,6 +532,7 @@ def create_uuid() -> str:
 
 def init_default_state(config):
 
+    print("initializing default state...")
     ####################################################
     # sample structure of 'current_state':
     # {
@@ -562,7 +568,7 @@ def init_default_state(config):
     #  ...
     # }
     #
-    default_state = get_initial_state(config)
+    default_state = config_to_state(config)
     globals['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
 
     #Initialize all envs into a 'not ready' state
@@ -578,7 +584,7 @@ def init_default_state(config):
             default_state[env]['clusters'][cluster]['existing_cert'] = None
             default_state[env]['clusters'][cluster]['valid_age'] = False
             default_state[env]['clusters'][cluster]['matches_master'] = False
-    
+
     return default_state
 
 
@@ -594,7 +600,7 @@ def enforce_desired_state(current_state):
         # check state of clusters and certs; push state info into current_state{}
         for cluster in current_state[env]['clusters']:
             
-            creds = get_cluster_creds(env=env, cluster_name=cluster)
+            creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
             print("Retrieving existing cluster certs, if any...")
             cluster_certs = get_existing_certs(cluster_name=cluster, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token']) # returns list[]
             
