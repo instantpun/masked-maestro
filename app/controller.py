@@ -668,10 +668,9 @@ def enforce_desired_state(current_state):
                 # master_cert and master_key are created as a pair... if one exists, but not the other, we will overwrite both with a new pair
                 current_state[env]['master_cert'], current_state[env]['master_key'] = create_new_cert()
                 
-                print('master_key: {}'.format(current_state[env]['master_key']))
                 # validate master_cert and master_key MUST NOT be empty strings or None
-                assert current_state[env]['master_key'] is True, "Missing Value: Empty string or null value @ key = current_state[{}]['master_key']".format(env)
-                assert current_state[env]['master_cert'] is True, "Missing Value: Empty string or null value @ key = current_state[{}]['master_cert']".format(env)
+                assert current_state[env]['master_key'], "Missing Value: Empty string or null value @ key = current_state[{}]['master_key']".format(env)
+                assert current_state[env]['master_cert'], "Missing Value: Empty string or null value @ key = current_state[{}]['master_cert']".format(env)
             except AssertionError as err:
                 # if either 'master_cert' or 'master_key' is still None, program breaks~
                 raise err
