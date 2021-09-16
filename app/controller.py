@@ -8,6 +8,7 @@ import re
 import yaml, json
 from contextlib import contextmanager
 import subprocess
+from app import current_state
 
 # GLOBAL VARS
 

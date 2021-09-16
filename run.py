@@ -1,18 +1,22 @@
 import threading
 from datetime import datetime
-from flask import Flask,render_template,request,send_from_directory
+#from flask import render_template,request,send_from_directory
 import os
 import yaml
-import api_routes
-import operator
+from app import app as webapp, current_state
+import app.api_routes
+import app.controller as ctl
 
 
-# initialize the Flask app object
-app = Flask(__name__)
+# Statement for enabling the development environment
+DEBUG = True
+
+# Define the application directory
+import os
+BASE_DIR = os.path.abspath(os.path.dirname(__file__)) 
+
 
 old_print = print
-
-current_state = dict()
 
 def timestamped_print(*args, **kwargs):
   old_print(datetime.now(), *args, **kwargs)
@@ -20,9 +24,9 @@ def timestamped_print(*args, **kwargs):
 print = timestamped_print
 
 def main():
-    config = yaml_file_to_dict(INVENTORY_PATH)
-    default_state = init_default_state(config)
-    current_state = enforce_desired_state(default_state)
+    config = ctl.yaml_file_to_dict(ctl.INVENTORY_PATH)
+    default_state = ctl.init_default_state(config)
+    current_state = ctl.enforce_desired_state(default_state)
 
     # possible one-liner = enforce_desired_state(init_default_state(yaml_file_to_dict(INVENTORY_PATH)))
     # TODO: Implement control loop...
@@ -47,3 +51,4 @@ if __name__ == '__main__':
   #make_thread()
   #app.run(host='0.0.0.0', port=5000, debug=True)
   main()
+  webapp.run(host='0.0.0.0', port=8080, debug=True)
