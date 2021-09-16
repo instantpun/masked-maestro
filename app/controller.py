@@ -350,8 +350,12 @@ def create_new_cert():
         # read command output from stdout, returns str()
         raw_output = proc.stdout.read()
 
+    # may receive bytes or str depending on host env
+    if isinstance(raw_output, bytes):
+        raw_output = raw_output.decode('utf-8')
+
     # create list containg line-by-line of raw_output
-    lines = raw_output.split(b"\n")
+    lines = raw_output.split("\n")
 
     #print(lines)
     priv_key_l = []
@@ -364,10 +368,10 @@ def create_new_cert():
     flag = False
     cursor = 0
     for i, line in enumerate(lines):
-        if line == b'-----BEGIN PRIVATE KEY-----':
+        if line == '-----BEGIN PRIVATE KEY-----':
             priv_key_l.append(line)
             flag = True
-        elif line == b'-----END PRIVATE KEY-----':
+        elif line == '-----END PRIVATE KEY-----':
             priv_key_l.append(line)
             flag = False
             # set line cursor to skip ahead alrady visited lines in next loop
@@ -379,21 +383,20 @@ def create_new_cert():
 
     # continue from cursor
     for line in lines[cursor:]:
-        if line == b'-----BEGIN CERTIFICATE-----':
+        if line == '-----BEGIN CERTIFICATE-----':
             cert_l.append(line)
             flag = True
-        elif line == b'-----END CERTIFICATE-----':
+        elif line == '-----END CERTIFICATE-----':
             cert_l.append(line)
             flag = False
         elif flag:
             cert_l.append(line)
 
     # combine lists into single string for priv_key and cert
-    priv_key = b"\n".join(priv_key_l)
-    cert = b"\n".join(cert_l)
-    #    print(output)
+    priv_key = "\n".join(priv_key_l)
+    cert = "\n".join(cert_l)
 
-    return cert.decode('utf-8'), priv_key.decode('utf-8')
+    return cert, priv_key
 
 
 def get_cluster_creds(current_state, env=None, cluster_name=None) -> dict:
@@ -401,7 +404,7 @@ def get_cluster_creds(current_state, env=None, cluster_name=None) -> dict:
     """
     # assert current_state
     assert cluster_name and isinstance(cluster_name, str), "func: get_cluster_creds, param: cluster_name -- 'cluster_name' must be a non-empty string"
-    print("inside get_cluster_creds, current_state:\n" + str(current_state) )
+
     creds = dict()
 
     # apiserver_token is the auth token stored inside a shell variable
@@ -410,6 +413,7 @@ def get_cluster_creds(current_state, env=None, cluster_name=None) -> dict:
     # e.g. if cluster = my-dev, then a shell variable exists where MY_DEV = myclustertokenhere
     apiserver_token = os.environ.get( cluster_name.replace('-','_').upper() )
 
+    #TODO: add error handling
     creds['cluster_name'] = cluster_name
     creds['apiserver_url'] = current_state[env]['clusters'][cluster_name]['apiserver_url']
     creds['apiserver_token'] = apiserver_token
@@ -664,6 +668,7 @@ def enforce_desired_state(current_state):
                 # master_cert and master_key are created as a pair... if one exists, but not the other, we will overwrite both with a new pair
                 current_state[env]['master_cert'], current_state[env]['master_key'] = create_new_cert()
                 
+                print('master_key: {}'.format(current_state[env]['master_key']))
                 # validate master_cert and master_key MUST NOT be empty strings or None
                 assert current_state[env]['master_key'] is True, "Missing Value: Empty string or null value @ key = current_state[{}]['master_key']".format(env)
                 assert current_state[env]['master_cert'] is True, "Missing Value: Empty string or null value @ key = current_state[{}]['master_cert']".format(env)
