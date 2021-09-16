@@ -409,6 +409,8 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
     :type: list[str]
     """
 
+    assert cluster_name and isinstance(cluster_name, str), "func: get_existing_certs, param: cluster_name -- 'cluster_name' must be a non-empty string"
+
     print("Checking for certs in " + cluster_name)
 
     # cluster_token is the auth token stored inside a shell variable
