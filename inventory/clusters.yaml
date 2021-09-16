@@ -1,0 +1,9 @@
+clusters:
+  dev1:
+    active: true
+    shared_env: 'dev'
+    api_server: 'https://api.dev1-cluster.sample.com:6443'
+  dev2:
+    active: false
+    shared_env: 'dev'
+    api_server: 'https://api.dev1-cluster.sample.com:6443'
