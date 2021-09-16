@@ -36,21 +36,24 @@ def run_subprocess(cmd, **kwargs):
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True, **kwargs)
     # Context breakdown, and yield control to calling function
     yield proc
-
     # when calling function exits, resume run_process context:
+    
+    try:
+        # To check if a process has terminated, call subprocess.Popen.poll() with subprocess.Popen as the process.
+        # If a None value is returned, it indicates that the process hasn’t terminated yet.
+        # CLEANUP: if calling function has exited, then terminate current process to prevent zombie attacks :P
+        if proc.poll() is not None:
+            proc.terminate()
 
-    # To check if a process has terminated, call subprocess.Popen.poll() with subprocess.Popen as the process.
-    # If a None value is returned, it indicates that the process hasn’t terminated yet.
-    # CLEANUP: if calling function has exited, then terminate current process to prevent zombie attacks :P
-    if proc.poll() is not None:
-        proc.terminate()
-
-    # emit warning message if process terminated with an unsuccessful return code
-    if proc.returncode != 0:
-        print("WARN: Process \'{}\' terminated with code {}".format(cmd[0], proc.returncode) + "\n")
-    err = proc.stderr.read()
-    if err:
-        print("WARN: Received error output: {}".format(err))
+        # emit warning message if process terminated with an unsuccessful return code
+        if proc.returncode != 0:
+            print("WARN: Process \'{}\' terminated with code {}".format(cmd[0], proc.returncode) + "\n")
+        err = proc.stderr.read()
+        if err:
+            print("WARN: Received error output: {}".format(err))
+    except Exception as err: #TODO - improve lazy error handling
+        print(err)
+        pass
 
 # Read in cluster list from configuration file, parse to create list and remove hidden characters such as new line
 
@@ -77,8 +80,6 @@ def yaml_file_to_dict(path) -> dict:
         # safe_load() reads the file stream and converts yaml formatted text to a python dict() object
         d = yaml.safe_load(f)
 
-    print("Clusters in Configuration: ")
-    print(", ".join(d['clusters'].keys())) # dict.keys() returns an iterable list of key names
     return d
 
 def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apiserver_token=None, from_master=False, current_state=None, env=None):
@@ -123,10 +124,10 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     tls_signer_secret['metadata']['name'] = secret_name
 
     # cert must be in standard PEM format
-    tls_signer_secret['data']['tls.crt'] = current_state['master_cert'] if from_master else cert
+    tls_signer_secret['data']['tls.crt'] = current_state[env]['master_cert'] if from_master else cert
 
     # key must be in unencrypted PEM format
-    tls_signer_secret['data']['tls.key'] = current_state['master_key']  if from_master else key
+    tls_signer_secret['data']['tls.key'] = current_state[env]['master_key']  if from_master else key
 
     # set custom labels
     labels = { "sealedsecrets.bitnami.com/sealed-secrets-key": "active"
@@ -146,7 +147,6 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     
     # setup process
     deployCmd = " ".join([ "oc create secret",
-                         cert,
                          "--token={}".format(apiserver_token),
                          "--server{}".format(apiserver_url),
                          "--insecure-skip-tls-verify",
@@ -156,11 +156,15 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
 
     print("Distributing Cert to " + apiserver_url)
 
-    with run_subprocess(deployCmd, stdin=subprocess.PIPE) as proc:
+    with run_subprocess(deployCmd) as proc:
         # covert tls_signer_secret to yaml-formatted text and send to cli command stdin
         # communicate() returns a 2-tuple of bytes objects, 0 = stdin, 1 = stderr
         # Note: in python 3.4+, input to stdin must be encoded as bytes
-        output = proc.communicate( input=yaml.dumps(tls_signer_secret).encode() )[0]
+        input_yaml = str( yaml.dump(tls_signer_secret) )
+        # if isinstance(input_yaml, str):
+        #     input_yaml = input_yaml.encode()
+
+        output = proc.communicate( input=input_yaml )[0]
         returncode = proc.returncode
 
         # stderr will be logged by the run_subprocess() context manager
@@ -788,7 +792,7 @@ def enforce_desired_state(current_state):
                 # deploy master cert 
                 creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
                 name = "sealing-secret-{}".format(create_uuid())
-                deploy_cert(secret_name=name, env=env, from_master=True, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'])
+                deploy_cert(secret_name=name, from_master=True, env=env, current_state=current_state, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'])
                 
                 # TODO: add validations... Just blindly assuming that the cert exists, even if the deploy_cert() operation fails
                 #current_state[env]['clusters'][cluster]['existing_cert'] = current_state[env]['master_cert']

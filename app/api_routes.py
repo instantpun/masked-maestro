@@ -54,6 +54,7 @@ def cert(env):
     :param env: This parameter should correspond to one of the top-level fields in the inventory.yaml file (e.g. 'dev','test','prod', etc)
     :type: str
     """
+    global current_state
     try:
       if not current_state.get(env): 
         raise NotFoundError('No resource was found for the env provided')
