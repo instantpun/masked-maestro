@@ -1,6 +1,5 @@
 import threading
 from datetime import datetime
-#from flask import Flask,render_template,request,send_from_directory
 from base64 import urlsafe_b64encode, b64decode
 import sys
 import os
@@ -8,12 +7,12 @@ import re
 import yaml, json
 from contextlib import contextmanager
 import subprocess
-from app import current_state
+from app import current_state, globals
 
 # GLOBAL VARS
 
 # flag DEBUG=True if '--debug' was passed as 1st cli argument
-DEBUG = True if len(sys.argv) > 1 and sys.argv[1] == '--debug' else False
+#DEBUG = True if len(sys.argv) > 1 and sys.argv[1] == '--debug' else False
 INVENTORY_PATH = os.environ.get('INVENTORY_PATH') # shell var should be defined in k8s deployment
 WORKING_DIR = "/tmp/certs" # shell var should be defined in k8s deployment
 POLL_TIME_SEC = int(os.environ.get('POLL_TIME_SEC')) if os.environ.get('POLL_TIME_SEC') else 600 # time = seconds, default 600 sec
@@ -285,7 +284,7 @@ def fetch_cert_key_from_secret(secret_name, cluster_name=None, cluster_token=Non
     :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
 
-    :return cert_key: TODO
+    :return cert_key: Tuple contains two strings (1) the plaintext certificate and (2) the plaintext pem-formatted key retrieved from the provided secret
     :type: tuple(str, str)
     """
     if not isinstance(secret_name, str):
@@ -293,7 +292,7 @@ def fetch_cert_key_from_secret(secret_name, cluster_name=None, cluster_token=Non
 
     # cluster_token is the auth token stored inside a shell variable
     # variable is exported by running the secrets_export.sh script
-    # e.g. SAT_OCP_OPS = myclustertokenhere
+    # e.g. DC_OCP_OPS = myclustertokenhere
     if not cluster_token:
         cluster_token = os.environ.get( cluster_name.replace('-','_').upper() )
 
@@ -320,8 +319,8 @@ def fetch_cert_key_from_secret(secret_name, cluster_name=None, cluster_token=Non
     with run_subprocess(certCmd) as proc:
         # read command output from stdout, returns str()
         secret = json.loads( proc.stdout.read() )
-    
-    #schema validation
+
+    #TODO: Determine if schema validation is needed:
     #assert secret.get('type') == 'kubernetes.io/tls', "func: fetch_cert_key_from_secret - field 'type' in secret must be 'kubernetes.io/tls'"
 
     cert_key = ( b64decode( secret['data']['tls.crt'] ), b64decode( secret['data']['tls.key'] ) )
@@ -547,7 +546,6 @@ def init_default_state(config):
     # }
     #
     default_state = get_initial_state(config)
-    globals = dict()
     globals['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
 
     #Initialize all envs into a 'not ready' state
@@ -745,7 +743,3 @@ def enforce_desired_state(current_state):
             continue
 
     return
-
-if __name__ == '__main__':
-    main()
-    print(current_state)
