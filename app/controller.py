@@ -291,7 +291,6 @@ def fetch_cert_key_from_secret(secret_name=None, apiserver_url=None, apiserver_t
     :type: tuple(str, str)
     """
 
-    assert cluster_name and isinstance(cluster_name, str), "func: fetch_cert_key_from_secret, param: cluster_name -- 'cluster_name' must be a non-empty string"
     assert secret_name, "func: fetch_cert_key_from_secret, param: secret_name -- 'secret_name' must be a non-empty string"
     if not isinstance(secret_name, str):
         secret_name = str(secret_name) # enforce str() typing
@@ -685,12 +684,19 @@ def enforce_desired_state(current_state):
         print('Comparing cluster certs with known master certs for current env...')
         for cluster in current_state[env]['clusters']:
             secret_name = current_state[env]['clusters'][cluster]['existing_cert']
-            cluster_cert = fetch_cert_key_from_secret( secret_name, cluster_name=cluster )[0]
-            
-            if cluster_cert == current_state[env]['master_cert']:
-                current_state[env]['clusters'][cluster]['matches_master'] = True
+
+            # if secret_name is empty, or secret_name is known, but cluster_cert does not match, set matches_master to False
+            if not secret_name:
+               current_state[env]['clusters'][cluster]['matches_master'] = False
             else:
-                current_state[env]['clusters'][cluster]['matches_master'] = False
+                # get credentials for current cluster
+                creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
+                cluster_cert, cluster_key = fetch_cert_key_from_secret( secret_name, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'] )
+                
+                if cluster_cert == current_state[env]['master_cert'] and cluster_key == current_state[env]['master_key']:
+                    current_state[env]['clusters'][cluster]['matches_master'] = True
+                else:
+                    current_state[env]['clusters'][cluster]['matches_master'] = False
 
 
         ######## (3) Evaluate in-memory state of env in current iteration #######
