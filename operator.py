@@ -745,51 +745,6 @@ def enforce_desired_state(current_state):
 
     return
 
-
-# def gen_certs():
-#     """
-#     gen_certs is an idempotent function which ensures the cluster certificates are generated and installed
-#     """
-
-#     print("CERT VALIDATION")
-#     # if the directory specified in WORKING_DIR does not exist, create it, else do nothing.
-#     if not os.path.isdir(WORKING_DIR):
-#         os.mkdir(WORKING_DIR)
-#     fileUUIDtmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
-#     # enforce alphanumeric chars in UUID: strip any character that does not occur in the set [A-Za-z0-9]
-#     fileUUID = re.sub('[^A-Za-z0-9]+', '', fileUUIDtmp)
-
-#     #
-#     config = yaml_file_to_dict(INVENTORY_PATH)
-
-#     # use get_cluster_map() as a basis for data model
-#     current_state = get_initial_state(config)
-
-def main():
-    global current_state
-    config = yaml_file_to_dict(INVENTORY_PATH)
-    default_state = init_default_state(config)
-    current_state = enforce_desired_state(default_state)
-
-    # possible one-liner = enforce_desired_state(init_default_state(yaml_file_to_dict(INVENTORY_PATH)))
-    # TODO: Implement control loop...
-    
-    # retry_counter = 0 # self-terminate if failed 5 times
-    # 
-    # while current_state != desired_state:
-    #
-    #     enforce_desired_state(default_state)
-    #     if current_state == desired_state:
-    #         retry_counter = 0 # reset counter
-    #
-    #         
-    #         sleep(POLL_TIME_SEC) # sleep 1 hr and check again
-    #         continue
-    #     else:
-    #         retry_counter += 1
-    #         assert retry_counter < RETRY_LIMIT, "Unable to establish desired state after 5 attempts, terminating..."
-    #         
-
 if __name__ == '__main__':
     main()
     print(current_state)
