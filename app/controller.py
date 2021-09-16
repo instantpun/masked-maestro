@@ -274,27 +274,27 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
 
     return secret_age
 
-def fetch_cert_key_from_secret(secret_name, cluster_name=None, cluster_token=None) -> str:
+def fetch_cert_key_from_secret(secret_name=None, apiserver_url=None, apiserver_token=None) -> str:
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
+    :param secret_name: TODO
     :type: str
 
-    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
+    :param apiserver_url: TODO
+    :type: str
+
+    :param apiserver_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
 
     :return cert_key: Tuple contains two strings (1) the plaintext certificate and (2) the plaintext pem-formatted key retrieved from the provided secret
     :type: tuple(str, str)
     """
+
+    assert cluster_name and isinstance(cluster_name, str), "func: fetch_cert_key_from_secret, param: cluster_name -- 'cluster_name' must be a non-empty string"
+    assert secret_name, "func: fetch_cert_key_from_secret, param: secret_name -- 'secret_name' must be a non-empty string"
     if not isinstance(secret_name, str):
         secret_name = str(secret_name) # enforce str() typing
-
-    # cluster_token is the auth token stored inside a shell variable
-    # variable is exported by running the secrets_export.sh script
-    # e.g. DC_OCP_OPS = myclustertokenhere
-    if not cluster_token:
-        cluster_token = os.environ.get( cluster_name.replace('-','_').upper() )
 
     # when 'cmd' executes, it will:
     # retrieve the name of a specific k8s secret
@@ -307,13 +307,13 @@ def fetch_cert_key_from_secret(secret_name, cluster_name=None, cluster_token=Non
     certCmd = " ".join([ "oc get secret",
                          secret_name,
                          "-o json",
-                         "--token={}".format(cluster_token),
-                         "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
-                         "--insecure-skip-tls-verify",
-                         "--namespace sealed-secrets"
+                         "--namespace sealed-secrets",
+                         "--token={}".format(apiserver_token),
+                         "--server={}".format(apiserver_url),
+                         "--insecure-skip-tls-verify"
+                       ])
                         #  "| jq -r \'.data.\"tls.crt\"\'",
                         #  "| base64 -d"
-                       ])
 
     # spawn process to run oc command, and send output to stdout
     with run_subprocess(certCmd) as proc:
@@ -682,6 +682,7 @@ def enforce_desired_state(current_state):
             print("Master Cert and Key found for env. env={}".format(env))
 
         ######## (2.1) Compare cluster certs to master_cert for current env ########
+        print('Comparing cluster certs with known master certs for current env...')
         for cluster in current_state[env]['clusters']:
             secret_name = current_state[env]['clusters'][cluster]['existing_cert']
             cluster_cert = fetch_cert_key_from_secret( secret_name, cluster_name=cluster )[0]
