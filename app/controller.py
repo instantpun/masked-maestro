@@ -255,7 +255,7 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
     # 2. auth token
 
     cmd = " ".join(["oc get secrets",
-                     "-l operator=managed",
+                     "-l masked-maestro/generated=true",
                      "--namespace sealed-secrets",
                      "--insecure-skip-tls-verify",
                      "--server https://api.{}{}:6443/".format(cluster_name, WiLDCARD_DOMAIN),
@@ -395,7 +395,28 @@ def create_new_cert():
 
     return cert.decode('utf-8'), priv_key.decode('utf-8')
 
-def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
+
+def get_cluster_creds(env=None, cluster_name=None) -> dict:
+    """
+    """
+    # assert current_state
+    assert cluster_name and isinstance(cluster_name, str), "func: get_cluster_creds, param: cluster_name -- 'cluster_name' must be a non-empty string"
+
+    creds = dict()
+
+    # apiserver_token is the auth token stored inside a shell variable
+    # shell variable corresponds to the cluster name
+    # variable is exported by running the secrets_export.sh script
+    # e.g. if cluster = my-dev, then a shell variable exists where MY_DEV = myclustertokenhere
+    apiserver_token = os.environ.get( cluster_name.replace('-','_').upper() )
+
+    creds['cluster_name'] = cluster_name
+    creds['apiserver_url'] = current_state[env]['clusters'][cluster_name]['apiserver_url']
+    creds['apiserver_token'] = apiserver_token
+
+    return creds
+
+def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=None) -> list:
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
@@ -413,15 +434,9 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
 
     print("Checking for certs in " + cluster_name)
 
-    # cluster_token is the auth token stored inside a shell variable
-    # variable is exported by running the secrets_export.sh script
-    # e.g. SAT_OCP_OPS = myclustertokenhere
-    if not cluster_token:
-        cluster_token = os.environ.get( cluster_name.replace('-','_').upper() )
-
     # when 'cmd' executes, it will:
     # retrieve the name of all k8s secrets
-    # with the label 'operator=managed'
+    # with the label 'masked-maestro/generated=true'
     # from the namespace 'sealed-secrets'
     # sorts output by oldest timestamp first
     # ignores mutual TLS handshake (one-way SSL only... we're lazy)
@@ -432,11 +447,11 @@ def get_existing_certs(cluster_name=None, cluster_token=None) -> list:
     cmd = " ".join(["oc get secrets",
                     "--sort-by=.metadata.creationTimestamp",
                     '-o jsonpath=\'{.items[:].metadata.name}\'',
-                    "-l operator=managed",
+                    "-l masked-maestro/generated=true",
                     "--namespace sealed-secrets",
                     "--insecure-skip-tls-verify",
-                    "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
-                    " --token={}".format(cluster_token)
+                    "--server {}".format(apiserver_url),
+                    " --token={}".format(apiserver_token)
               ])
 
     print("Checking existing certs with command:\n" + cmd)
@@ -580,7 +595,7 @@ def enforce_desired_state(current_state):
         for cluster in current_state[env]['clusters']:
             
             print("Retrieving existing cluster certs, if any...")
-            cluster_certs = get_existing_certs() # returns list[]
+            cluster_certs = get_existing_certs(cluster_name=cluster) # returns list[]
             
             print("Determining state of clusters and certs for current env. env={}".format(env))
             # outofsync if cert is not deployed
