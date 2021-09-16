@@ -594,8 +594,9 @@ def enforce_desired_state(current_state):
         # check state of clusters and certs; push state info into current_state{}
         for cluster in current_state[env]['clusters']:
             
+            creds = get_cluster_creds(env=env, cluster_name=cluster)
             print("Retrieving existing cluster certs, if any...")
-            cluster_certs = get_existing_certs(cluster_name=cluster) # returns list[]
+            cluster_certs = get_existing_certs(cluster_name=cluster, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token']) # returns list[]
             
             print("Determining state of clusters and certs for current env. env={}".format(env))
             # outofsync if cert is not deployed
