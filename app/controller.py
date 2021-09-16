@@ -530,9 +530,8 @@ def create_uuid() -> str:
     
     return uuid
 
-def init_default_state(config):
-
-    print("initializing default state...")
+def set_defaults_in_state(state):
+    print("setting defaults in current state...")
     ####################################################
     # sample structure of 'current_state':
     # {
@@ -544,7 +543,8 @@ def init_default_state(config):
     #          {
     #           'existing_cert': str(), # default = None, should be str()
     #           'valid_age': bool() # default = False ... may need default = None???
-    #           'matches_master': bool() # default = False 
+    #           'matches_master': bool() # default = False
+    #           'apiserver_url': str() # default = None, should be str()
     #           ...
     #          },
     #        'sandbox': { ... }
@@ -568,25 +568,42 @@ def init_default_state(config):
     #  ...
     # }
     #
-    default_state = config_to_state(config)
     globals['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
 
     #Initialize all envs into a 'not ready' state
-    for env in default_state:
-        default_state[env]['ready'] = False 
-        default_state[env]['all_certs_exist'] = False 
-        default_state[env]['all_certs_valid'] = False
-        default_state[env]['all_certs_match'] = False
-        default_state[env]['master_cert'] = None
-        default_state[env]['master_key'] = None
+    for env in state:
+        if not state[env].get('ready'):
+            state[env]['ready'] = False
         
-        for cluster in default_state[env]['clusters']:
-            default_state[env]['clusters'][cluster]['existing_cert'] = None
-            default_state[env]['clusters'][cluster]['valid_age'] = False
-            default_state[env]['clusters'][cluster]['matches_master'] = False
+        if not state[env].get('all_certs_exist'):
+            state[env]['all_certs_exist'] = False    
+        
+        if not state[env].get('all_certs_valid'):
+            state[env]['all_certs_valid'] = False
+        
+        if not state[env].get('all_certs_match'):
+            state[env]['all_certs_match'] = False
+        
+        if not state[env].get('master_cert'):
+            state[env]['master_cert'] = None
+        
+        if not state[env].get('master_key'):
+            state[env]['master_key'] = None
+        
+        for cluster in state[env]['clusters']:
+            if not state[env]['clusters'][cluster].get('existing_cert'):
+                state[env]['clusters'][cluster]['existing_cert'] = None
 
-    return default_state
+            if not state[env]['clusters'][cluster].get('valid_age'):
+                state[env]['clusters'][cluster]['valid_age'] = False
 
+            if not state[env]['clusters'][cluster].get('matches_master'):
+                state[env]['clusters'][cluster]['matches_master'] = False            
+
+            if not state[env]['clusters'][cluster].get('apiserver_url'):
+                state[env]['clusters'][cluster]['apiserver_url'] = None
+    
+    return state
 
 
 def enforce_desired_state(current_state):
