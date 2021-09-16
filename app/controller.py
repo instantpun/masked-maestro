@@ -81,7 +81,7 @@ def yaml_file_to_dict(path) -> dict:
     print(", ".join(d['clusters'].keys())) # dict.keys() returns an iterable list of key names
     return d
 
-def deploy_cert(cert=None, key=None, from_master=False, cluster_name=None, cluster_token=None):
+def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apiserver_token=None, from_master=False, current_state=None, env=None):
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
@@ -94,30 +94,33 @@ def deploy_cert(cert=None, key=None, from_master=False, cluster_name=None, clust
     :param from_master: If True, deploy_cert() will attempt to create a k8s secret using the master_cert and master_key stored in-memory
     :type: bool
 
-    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
+    :param secret_name: The name of the resulting k8s secret resource
     :type: str
 
-    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
+    :param apiserver_url: TODO
+    :type: str
+
+    :param apiserver_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
     """
     
     assert not (from_master and (cert or key)), "func: deploy_cert(), keyword argument 'from_master' cannot be used with arguments 'cert' or 'key'."
     
     if from_master:
-        assert current_state.get('master_cert') and current_state.get('master_key'), "func: deploy_cert(), Missing Dependency - master_cert or master_key not set."
+        assert env, "func: deploy_cert(), param: env -- Invalid Param: env must be a non-empty string and match one of the fields in the inventory file"
+        assert current_state, "func: deploy_cert(), param: current_state -- Invalid Param: current_state is empty" # TODO: Need better message"
+        assert current_state.get(env), "func: deploy_cert(), param: current_state -- Missing Dependency: current_state does not contain key '{}'".format(env) # TODO: Need better message"
+        assert current_state[env].get('master_cert') and current_state[env].get('master_key'), "func: deploy_cert() -- Missing Dependency: master_cert or master_key for provided env are not set."
 
     if not from_master:
         assert cert and key, "func: deploy_cert(), params: cert, key - Both a plaintext, PEM-formatted certificate and unencrypted key must be provided."
         assert isinstance(cert, str) and isinstance(key, str), "func: deploy_cert(), params: cert, key - 'cert' and 'key' parameters must be of type str()"
-        
-    # cluster_token is the auth token stored inside a shell variable
-    # variable is exported by running the secrets_export.sh script
-    # e.g. SAT_OCP_OPS = myclustertokenhere
-    if not cluster_token:
-        cluster_token = os.environ.get( cluster_name.replace('-','_').upper() )
     
+    if not secret_name:
+        secret_name = "sealing-secret-" + create_uuid()
+
     tls_signer_secret = yaml_file_to_dict('k8s_templates/secret_tls.yaml')
-    tls_signer_secret['metadata']['name'] = "sealing-secret-" + create_uuid()
+    tls_signer_secret['metadata']['name'] = secret_name
 
     # cert must be in standard PEM format
     tls_signer_secret['data']['tls.crt'] = current_state['master_cert'] if from_master else cert
@@ -144,14 +147,14 @@ def deploy_cert(cert=None, key=None, from_master=False, cluster_name=None, clust
     # setup process
     deployCmd = " ".join([ "oc create secret",
                          cert,
-                         "--token={}".format(cluster_token),
-                         "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
+                         "--token={}".format(apiserver_token),
+                         "--server{}".format(apiserver_url),
                          "--insecure-skip-tls-verify",
                          "--namespace sealed-secrets",
                          "-f -"
                        ])
 
-    print("Distributing Cert to " + cluster_name)
+    print("Distributing Cert to " + apiserver_url)
 
     with run_subprocess(deployCmd, stdin=subprocess.PIPE) as proc:
         # covert tls_signer_secret to yaml-formatted text and send to cli command stdin
@@ -783,10 +786,12 @@ def enforce_desired_state(current_state):
                             
             for cluster in deploy_targets:
                 # deploy master cert 
-                deploy_cert(cluster_name=cluster, from_master=True)
+                creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
+                name = "sealing-secret-{}".format(create_uuid())
+                deploy_cert(secret_name=name, env=env, from_master=True, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'])
                 
                 # TODO: add validations... Just blindly assuming that the cert exists, even if the deploy_cert() operation fails
-                current_state[env]['clusters'][cluster]['existing_cert'] = current_state[env]['master_cert']
+                #current_state[env]['clusters'][cluster]['existing_cert'] = current_state[env]['master_cert']
                 current_state[env]['clusters'][cluster]['valid_age'] = True
                 current_state[env]['clusters'][cluster]['matched_master'] = True
         else:
