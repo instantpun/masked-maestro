@@ -47,8 +47,10 @@ def cert(env):
     :type: str
     """
     try:
+      if not current_state.get('env'): 
+        raise NotFoundError('No resource was found for the URI path provided')
+      
       return current_state[env]['master_cert']
-      raise No resource was found for the URI path provided
     except requests.exceptions.HTTPError as http_err:
       print(f'HTTP error occurred: {http_err}')  # Python 3.6
     except Exception as err:
