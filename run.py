@@ -1,20 +1,8 @@
-import threading
+import threading #TODO: implement multithreading
 from datetime import datetime
-#from flask import render_template,request,send_from_directory
-import os
-import yaml
 from app import app as webapp, current_state
 import app.api_routes
 import app.controller as ctl
-
-
-# Statement for enabling the development environment
-DEBUG = True
-
-# Define the application directory
-import os
-BASE_DIR = os.path.abspath(os.path.dirname(__file__)) 
-
 
 old_print = print
 
@@ -48,7 +36,5 @@ def main():
     #         
 
 if __name__ == '__main__':
-  #make_thread()
-  #app.run(host='0.0.0.0', port=5000, debug=True)
   main()
   webapp.run(host='0.0.0.0', port=8080, debug=True)
