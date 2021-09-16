@@ -741,9 +741,9 @@ def enforce_desired_state(current_state):
             current_state[env]['all_certs_match'] = False
 
         # evaluate state of env:
-        if all( current_state[env]['all_certs_exist'],
-                current_state[env]['all_certs_valid'],
-                current_state[env]['all_certs_match'] ):
+        if all([ current_state[env]['all_certs_exist'],
+                 current_state[env]['all_certs_valid'],
+                 current_state[env]['all_certs_match'] ]):
             current_state[env]['ready'] = True
         else:
             current_state[env]['ready'] = False
@@ -763,19 +763,19 @@ def enforce_desired_state(current_state):
         # These expressions are equivalent: -R = -(A & B & C) ⇔ -R = -A ∥ -B ∥ -C
         # Thus, not all(A, B, C) == any(not A, not B, not C)
         # 
-        if not all( current_state[env]['all_certs_exist'],
-                    current_state[env]['all_certs_valid'],
-                    current_state[env]['all_certs_match'] ):
+        if not all([ current_state[env]['all_certs_exist'],
+                     current_state[env]['all_certs_valid'],
+                     current_state[env]['all_certs_match'] ]):
 
             # just redeploy all certs from master, until the desired state is reached 
             deploy_targets = []
             
             for cluster in current_state[env]['clusters']:
-                # All 3 cluster conditions ('existing_cert','valid_age','matched_master') must evaluate to True,
+                # All 3 cluster conditions ('existing_cert','valid_age','matches_master') must evaluate to True,
                 # otherwise the cluster cert will be redeployed using 'master_cert'
-                if all( current_state[env]['clusters'][cluster]['existing_cert'], 
-                        current_state[env]['clusters'][cluster]['valid_age'], 
-                        current_state[env]['clusters'][cluster]['matched_master'] ):
+                if all([ current_state[env]['clusters'][cluster]['existing_cert'], 
+                         current_state[env]['clusters'][cluster]['valid_age'], 
+                         current_state[env]['clusters'][cluster]['matches_master'] ]):
                     pass # do nothing because cluster is fine
                 else:               
                     # flag cluster for new cert deployment
