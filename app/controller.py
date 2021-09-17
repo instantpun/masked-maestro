@@ -196,20 +196,20 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     return None
         
 
-def delete_ss_pod(cluster_name=None, cluster_token=None):
+def delete_ss_pod(apiserver_url=None, apiserver_token=None):
 
     delCmd = " ".join([ "oc delete pod",
                          "-l name=sealed-secrets-controller",
-                         "--token={}".format(cluster_token),
-                         "--server=https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
+                         "--token={}".format(apiserver_token),
+                         "--server={}".format(apiserver_url),
                          "--insecure-skip-tls-verify",
-                         "--namespace sealed-secrets"
+                         "--namespace sealed-secrets",
                        ])
 
     with run_subprocess(delCmd) as proc:
         returncode = proc.returncode
 
-    return None
+    return returncode
 
 
 def is_valid_age(age) -> bool:
