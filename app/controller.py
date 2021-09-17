@@ -244,7 +244,7 @@ def is_valid_age(age) -> bool:
         print("WARN: func: is_valid_age(), param: age, 'age' does not match any expected format. 'age' is assumed to be invalid")
         return False
 
-def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> bool:
+def get_secret_age(secret_name=None, apiserver_url=None, apiserver_token=None) -> bool:
     """
     Check if the provided cert is more than 100days old
 
@@ -263,13 +263,6 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
 
     print("Checking age of {}".format(secret_name))
 
-
-    # cluster_token is the auth token stored inside a shell variable
-    # variable is exported by running the secrets_export.sh script
-    # e.g. SAT_OCP_OPS = myclustertokenhere
-    if (cluster_token is None):
-        cluster_token = os.environ.get( cluster_name.replace('-','_').upper() )
-
     # when 'cmd' executes, it will:
     # retrieve the name of all k8s secrets
     # from the namespace 'sealed-secrets'
@@ -287,12 +280,13 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
 
     cmd = " ".join(["oc get secrets",
                      "-l masked-maestro/generated=true",
-                     "--namespace sealed-secrets",
+                     "--token={}".format(apiserver_token),
+                     "--server={}".format(apiserver_url),
                      "--insecure-skip-tls-verify",
-                     "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
-                     "--token={}".format(cluster_token),
+                     "--namespace sealed-secrets",
                      "| grep {} ".format(secret_name),
                      "| awk \'{print $4}\'"
+                     "| head -n 1"
                    ])
     #                         "| awk \'match($4,/1[0-9][0-9]+d/) {print $1}\'"
     #                   ])
