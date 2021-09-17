@@ -1,6 +1,6 @@
 import threading
 from datetime import datetime
-from base64 import urlsafe_b64encode, b64decode
+from base64 import urlsafe_b64encode, b64decode, b64encode
 import sys
 import os
 import re
@@ -8,6 +8,7 @@ import yaml, json
 from contextlib import contextmanager
 import subprocess
 from app import current_state, globals
+import io
 
 # GLOBAL VARS
 
@@ -33,7 +34,7 @@ print = timestamped_print
 def run_subprocess(cmd, **kwargs):
 
     # spawn new process
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True, **kwargs)
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True, **kwargs)
     # Context breakdown, and yield control to calling function
     yield proc
     # when calling function exits, resume run_process context:
@@ -47,16 +48,13 @@ def run_subprocess(cmd, **kwargs):
 
         # emit warning message if process terminated with an unsuccessful return code
         if proc.returncode != 0:
-            print("WARN: Process \'{}\' terminated with code {}".format(cmd[0], proc.returncode) + "\n")
+            print("WARN: Process \'{}\' terminated with code {}".format(cmd, proc.returncode) + "\n")
         err = proc.stderr.read()
         if err:
             print("WARN: Received error output: {}".format(err))
-    except Exception as err: #TODO - improve lazy error handling
+    except AttributeError as err: #TODO - improve lazy error handling
         print(err)
         pass
-
-# Read in cluster list from configuration file, parse to create list and remove hidden characters such as new line
-
 
 
 def yaml_file_to_dict(path) -> dict:
@@ -123,11 +121,11 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     tls_signer_secret = yaml_file_to_dict('k8s_templates/secret_tls.yaml')
     tls_signer_secret['metadata']['name'] = secret_name
 
-    # cert must be in standard PEM format
-    tls_signer_secret['data']['tls.crt'] = current_state[env]['master_cert'] if from_master else cert
+    # cert must be in standard PEM format, and base64 encoded
+    tls_signer_secret['data']['tls.crt'] = b64encode(current_state[env]['master_cert'].encode('utf-8') ).decode('utf-8') if from_master else cert
 
-    # key must be in unencrypted PEM format
-    tls_signer_secret['data']['tls.key'] = current_state[env]['master_key']  if from_master else key
+    # key must be in unencrypted PEM format, and base64 encoded
+    tls_signer_secret['data']['tls.key'] = b64encode(current_state[env]['master_key'].encode('utf-8') ).decode('utf-8')  if from_master else key
 
     # set custom labels
     labels = { "sealedsecrets.bitnami.com/sealed-secrets-key": "active"
@@ -146,28 +144,54 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     # 2. auth token
     
     # setup process
-    deployCmd = " ".join([ "oc create secret",
+    deployCmd = " ".join([ "oc create",
                          "--token={}".format(apiserver_token),
-                         "--server{}".format(apiserver_url),
+                         "--server={}".format(apiserver_url),
                          "--insecure-skip-tls-verify",
                          "--namespace sealed-secrets",
-                         "-f -"
+                         "--filename=-"
                        ])
-
+    #print(tls_signer_secret['data']['tls.crt'])
+    input_json = json.dumps(tls_signer_secret)
+    print("secret_result:\n" + input_json)
     print("Distributing Cert to " + apiserver_url)
 
-    with run_subprocess(deployCmd) as proc:
-        # covert tls_signer_secret to yaml-formatted text and send to cli command stdin
-        # communicate() returns a 2-tuple of bytes objects, 0 = stdin, 1 = stderr
-        # Note: in python 3.4+, input to stdin must be encoded as bytes
-        input_yaml = str( yaml.dump(tls_signer_secret) )
-        # if isinstance(input_yaml, str):
-        #     input_yaml = input_yaml.encode()
+    with io.BytesIO(input_json.encode('utf-8')) as outfile:
+        with run_subprocess(deployCmd) as proc:
+            output = proc.stdin.write(outfile.read())
+            proc.stdin.close()
+            proc.wait()
+        # p2_cmd = deployCmd
+        # p2 = subprocess.Popen(p2_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
+        # #p2_out, p2_err = p2.communicate( input=outfile )
+        # p2_out = p2.stdin.write(outfile.read())
+        # p2.stdin.close()
+        # p2.wait()
+        #output = p2_out.decode().strip()
+    print(output)
 
-        output = proc.communicate( input=input_yaml )[0]
-        returncode = proc.returncode
 
-        # stderr will be logged by the run_subprocess() context manager
+    # with run_subprocess(deployCmd) as proc:
+    #     # covert tls_signer_secret to yaml-formatted text and send to cli command stdin
+    #     # communicate() returns a 2-tuple of bytes objects, 0 = stdin, 1 = stderr
+    #     # Note: in python 3.4+, input to stdin must be encoded as bytes
+    #     input_yaml = yaml.dump(tls_signer_secret)
+    #     print("secret_result:\n" + input_yaml)
+    #     # if isinstance(input_yaml, str):
+    #     #     input_yaml = input_yaml.encode()
+
+    #     out, err = proc.communicate( input=input_yaml )
+        
+    #     # tls_secret = yaml.dump(tls_signer_secret)
+    #     # print(tls_secret)
+    #     # proc.stdin.write(tls_secret)
+    #     # proc.stdin.flush()
+
+    #     # output = proc.stdout.read()
+    #     print(out)
+    #     returncode = proc.returncode
+
+    #     # stderr will be logged by the run_subprocess() context manager
         
     return None
         
@@ -177,7 +201,7 @@ def delete_ss_pod(cluster_name=None, cluster_token=None):
     delCmd = " ".join([ "oc delete pod",
                          "-l name=sealed-secrets-controller",
                          "--token={}".format(cluster_token),
-                         "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
+                         "--server=https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
                          "--insecure-skip-tls-verify",
                          "--namespace sealed-secrets"
                        ])
@@ -265,7 +289,7 @@ def get_secret_age(secret_name=None, cluster_name=None, cluster_token=None) -> b
                      "-l masked-maestro/generated=true",
                      "--namespace sealed-secrets",
                      "--insecure-skip-tls-verify",
-                     "--server https://api.{}{}:6443/".format(cluster_name, WiLDCARD_DOMAIN),
+                     "--server https://api.{}{}:6443/".format(cluster_name, WILDCARD_DOMAIN),
                      "--token={}".format(cluster_token),
                      "| grep {} ".format(secret_name),
                      "| awk \'{print $4}\'"
@@ -680,9 +704,6 @@ def enforce_desired_state(current_state):
             except AssertionError as err:
                 # if either 'master_cert' or 'master_key' is still None, program breaks~
                 raise err
-            except:
-                # Not sure how we got here... time to panic!
-                raise
         else:
             # cert and key must exist, so...
             print("Master Cert and Key found for env. env={}".format(env))
