@@ -1,32 +1,26 @@
-import threading
-from datetime import datetime
-from base64 import urlsafe_b64encode, b64decode, b64encode
+# standard libs #
 import sys
 import os
 import re
 import yaml, json
 from contextlib import contextmanager
 import subprocess
-from app import current_state, globals
 import io
+import threading
+import dateutil.parser
+import datetime
+from base64 import urlsafe_b64encode, b64decode, b64encode
 
-# GLOBAL VARS
+# custom libs #
+import cfg
 
-# flag DEBUG=True if '--debug' was passed as 1st cli argument
-#DEBUG = True if len(sys.argv) > 1 and sys.argv[1] == '--debug' else False
-INVENTORY_PATH = os.environ.get('INVENTORY_PATH') # shell var should be defined in k8s deployment
-WORKING_DIR = "/tmp/certs" # shell var should be defined in k8s deployment
-POLL_TIME_SEC = int(os.environ.get('POLL_TIME_SEC')) if os.environ.get('POLL_TIME_SEC') else 600 # time = seconds, default 600 sec
-RETRY_LIMIT = int(os.environ.get('RETRY_LIMIT')) if os.environ.get('RETRY_LIMIT') else 3 # default 3 retries
-
-# global vars
-# wildcard domain for clusters
-WILDCARD_DOMAIN = "" if not os.environ.get('WILDCARD_DOMAIN') else os.environ.get('WILDCARD_DOMAIN')
+INVENTORY_PATH = cfg.INVENTORY_PATH
+WILDCARD_DOMAIN = cfg.WILDCARD_DOMAIN
 
 old_print = print
 
 def timestamped_print(*args, **kwargs):
-  old_print(datetime.now(), *args, **kwargs)
+  old_print(datetime.datetime.now(), *args, **kwargs)
 
 print = timestamped_print
 
@@ -49,9 +43,6 @@ def run_subprocess(cmd, **kwargs):
         # emit warning message if process terminated with an unsuccessful return code
         if proc.returncode != 0:
             print("WARN: Process \'{}\' terminated with code {}".format(cmd, proc.returncode) + "\n")
-        err = proc.stderr.read()
-        if err:
-            print("WARN: Received error output: {}".format(err))
     except AttributeError as err: #TODO - improve lazy error handling
         print(err)
         pass
@@ -80,7 +71,7 @@ def yaml_file_to_dict(path) -> dict:
 
     return d
 
-def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apiserver_token=None, from_master=False, current_state=None, env=None):
+def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apiserver_token=None, from_master=False, env=None):
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
@@ -102,7 +93,9 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     :param apiserver_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
     :type: str
     """
-    
+
+    current_state = cfg.current_state
+
     assert not (from_master and (cert or key)), "func: deploy_cert(), keyword argument 'from_master' cannot be used with arguments 'cert' or 'key'."
     
     if from_master:
@@ -153,46 +146,15 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
                        ])
     #print(tls_signer_secret['data']['tls.crt'])
     input_json = json.dumps(tls_signer_secret)
-    print("secret_result:\n" + input_json)
+    #print("secret_result:\n" + input_json)
     print("Distributing Cert to " + apiserver_url)
 
-    with io.BytesIO(input_json.encode('utf-8')) as outfile:
+    with io.StringIO(input_json) as outfile:
         with run_subprocess(deployCmd) as proc:
             output = proc.stdin.write(outfile.read())
             proc.stdin.close()
             proc.wait()
-        # p2_cmd = deployCmd
-        # p2 = subprocess.Popen(p2_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
-        # #p2_out, p2_err = p2.communicate( input=outfile )
-        # p2_out = p2.stdin.write(outfile.read())
-        # p2.stdin.close()
-        # p2.wait()
-        #output = p2_out.decode().strip()
-    print(output)
 
-
-    # with run_subprocess(deployCmd) as proc:
-    #     # covert tls_signer_secret to yaml-formatted text and send to cli command stdin
-    #     # communicate() returns a 2-tuple of bytes objects, 0 = stdin, 1 = stderr
-    #     # Note: in python 3.4+, input to stdin must be encoded as bytes
-    #     input_yaml = yaml.dump(tls_signer_secret)
-    #     print("secret_result:\n" + input_yaml)
-    #     # if isinstance(input_yaml, str):
-    #     #     input_yaml = input_yaml.encode()
-
-    #     out, err = proc.communicate( input=input_yaml )
-        
-    #     # tls_secret = yaml.dump(tls_signer_secret)
-    #     # print(tls_secret)
-    #     # proc.stdin.write(tls_secret)
-    #     # proc.stdin.flush()
-
-    #     # output = proc.stdout.read()
-    #     print(out)
-    #     returncode = proc.returncode
-
-    #     # stderr will be logged by the run_subprocess() context manager
-        
     return None
         
 
@@ -212,7 +174,7 @@ def delete_ss_pod(apiserver_url=None, apiserver_token=None):
     return returncode
 
 
-def is_valid_age(age) -> bool:
+def is_valid_age(age, time_format="ISO") -> bool:
     """
     :param age: A string which should match the pattern '[0-9][0-9][0-9][ydms]'
     :type: str
@@ -223,26 +185,41 @@ def is_valid_age(age) -> bool:
     # age must be a string at this time
     assert isinstance(age, str), "func: is_valid_age(), param: age, age must be of type str()"
 
-    # age is in the format of NNNI, where I is the interval and N is the number
-    # e.g. 17s = 17 seconds, 3m = 3 minutes, 50d = 50 days, 1y = 1 year
-    # X seconds or X minutes is too new, therefore always valid
-    if age.endswith('s') or age.endswith('m'):
-        return True
-    # X years > 100 days and is too old, therefore always invalid
-    elif age.endswith('y'):
-        return False
-    elif age.endswith('d'):
-        # age is a string with format 'NNNI'
-        # age[:-1] gives the substring 'NNN'
-        # if age[:-1] converts to a number equal to or greater than 100, then age is invalid
-        if int(age[:-1]) >= 100:
+    if time_format == "ISO":
+        # convert k8s ISO-formatted timestamp to common datetime object
+        age_dt = dateutil.parser.isoparse(age)
+
+        # set expiration time to 100days prior to now
+        expiry_dt = datetime.datetime.now() - datetime.timedelta(days=100)
+
+        if age_dt.timestamp() <= expiry_dt.timestamp():
             return False
         else:
+            return True        
+
+    # TODO: Discuss if parsing HR format is even needed
+    if time_format == "HR": # human-readable
+        # age is in the format of NNNI, where I is the interval and N is the number
+        # e.g. 17s = 17 seconds, 3m = 3 minutes, 50d = 50 days, 1y = 1 year
+        # X seconds or X minutes is too new, therefore always valid
+        if age.endswith('s') or age.endswith('m') or age.endswith('h'):
             return True
-    else:
-        # returns false generally, if str doesn't match the expected 'NNNI' format
-        print("WARN: func: is_valid_age(), param: age, 'age' does not match any expected format. 'age' is assumed to be invalid")
-        return False
+        # X years > 100 days and is too old, therefore always invalid
+        elif age.endswith('y'):
+            return False
+        elif age.endswith('d'):
+            # age is a string with format 'NNNI'
+            # age[:-1] gives the substring 'NNN'
+            # if age[:-1] converts to a number equal to or greater than 100, then age is invalid
+            if int(age[:-1]) >= 100:
+                return False
+            else:
+                return True
+        else:
+            # returns false generally, if str doesn't match the expected 'NNNI' format
+            print("WARN: func: is_valid_age(), param: age, 'age' does not match any expected format. 'age' is assumed to be invalid")
+            print(age)
+            return False
 
 def get_secret_age(secret_name=None, apiserver_url=None, apiserver_token=None) -> bool:
     """
@@ -278,19 +255,22 @@ def get_secret_age(secret_name=None, apiserver_url=None, apiserver_token=None) -
     # 1. destination api server
     # 2. auth token
 
-    cmd = " ".join(["oc get secrets",
-                     "-l masked-maestro/generated=true",
+    cmd = " ".join(["oc get secret",
+                     secret_name,
+                     "-o jsonpath='{.metadata.creationTimestamp}'",
                      "--token={}".format(apiserver_token),
                      "--server={}".format(apiserver_url),
                      "--insecure-skip-tls-verify",
                      "--namespace sealed-secrets",
-                     "| grep {} ".format(secret_name),
-                     "| awk \'{print $4}\'"
-                     "| head -n 1"
-                   ])
-    #                         "| awk \'match($4,/1[0-9][0-9]+d/) {print $1}\'"
-    #                   ])
-    print("Checking age of the secret '{}' containing the certificate with command:\n{}".format(secret_name, cmd))
+                ])
+                #      "| grep {} ".format(secret_name),
+                #      "| awk \'{print $4}\'"
+                #      "| head -n 1"
+                #    ])
+                    #     "| awk \'match($4,/1[0-9][0-9]+d/) {print $1}\'"
+                    # ])
+
+    #print("Checking age of the secret '{}' containing the certificate with command:\n{}".format(secret_name, cmd))
 
     # spawn process to run oc command, and send output to stdout
     with run_subprocess(cmd) as proc:
@@ -359,6 +339,7 @@ def create_new_cert():
     :type: tuple(str, str)
     """
 
+    print("create_new_cert()")
     # test command:
     # openssl req -x509 -nodes -newkey rsa:4096 -keyout /dev/stdout -out /dev/stdout  -subj "/CN=sealed-secret/O=sealed-secret"
     genCertCmd = " ".join(["openssl req",
@@ -482,11 +463,12 @@ def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=No
                     " --token={}".format(apiserver_token)
               ])
 
-    print("Checking existing certs with command:\n" + cmd)
+    #print("Checking existing certs with command:\n" + cmd)
 
     existing_certs = []
     # spawn process to run oc command, and send output to stdout
     with run_subprocess(cmd) as proc:
+
         # read command output from stdout, returns str()
         # output should be a series of space-delimited secret names
         # .split() returns a list()
@@ -543,7 +525,11 @@ def config_to_state(config=None) -> dict:
             assert config['clusters'][cluster].get('apiserver_url'), "apiserver_url field is missing"
             initial_env_state[ config['clusters'][cluster].get('shared_env') ]['clusters'][cluster]['apiserver_url'] = config['clusters'][cluster].get('apiserver_url')
 
-    return initial_env_state
+    set_current_state(initial_env_state)
+    # global current_state
+    # current_state = initial_env_state
+
+    return
 
 def create_uuid() -> str:
     """
@@ -558,7 +544,7 @@ def create_uuid() -> str:
     
     return uuid
 
-def set_defaults_in_state(state):
+def set_defaults_in_state():
     print("setting defaults in current state...")
     ####################################################
     # sample structure of 'current_state':
@@ -569,7 +555,7 @@ def set_defaults_in_state(state):
     #       {
     #        'dev1':
     #          {
-    #           'existing_cert': str(), # default = None, should be str()
+    #           'existing_cert_name': str(), # default = None, should be str()
     #           'valid_age': bool() # default = False ... may need default = None???
     #           'matches_master': bool() # default = False
     #           'apiserver_url': str() # default = None, should be str()
@@ -596,50 +582,59 @@ def set_defaults_in_state(state):
     #  ...
     # }
     #
-    globals['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
-
-    #Initialize all envs into a 'not ready' state
-    for env in state:
-        if not state[env].get('ready'):
-            state[env]['ready'] = False
-        
-        if not state[env].get('all_certs_exist'):
-            state[env]['all_certs_exist'] = False    
-        
-        if not state[env].get('all_certs_valid'):
-            state[env]['all_certs_valid'] = False
-        
-        if not state[env].get('all_certs_match'):
-            state[env]['all_certs_match'] = False
-        
-        if not state[env].get('master_cert'):
-            state[env]['master_cert'] = None
-        
-        if not state[env].get('master_key'):
-            state[env]['master_key'] = None
-        
-        for cluster in state[env]['clusters']:
-            if not state[env]['clusters'][cluster].get('existing_cert'):
-                state[env]['clusters'][cluster]['existing_cert'] = None
-
-            if not state[env]['clusters'][cluster].get('valid_age'):
-                state[env]['clusters'][cluster]['valid_age'] = False
-
-            if not state[env]['clusters'][cluster].get('matches_master'):
-                state[env]['clusters'][cluster]['matches_master'] = False            
-
-            if not state[env]['clusters'][cluster].get('apiserver_url'):
-                state[env]['clusters'][cluster]['apiserver_url'] = None
+    # global current_state
+    # global global_vars
+    current_state = cfg.current_state
+    global_vars = cfg.global_vars
     
-    return state
+    global_vars['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
+
+    #Initialize all envs into a 'not ready' current_state
+    for env in current_state.keys():
+        if not current_state[env].get('ready'):
+            current_state[env]['ready'] = False
+        
+        if not current_state[env].get('all_certs_exist'):
+            current_state[env]['all_certs_exist'] = False    
+        
+        if not current_state[env].get('all_certs_valid'):
+            current_state[env]['all_certs_valid'] = False
+        
+        if not current_state[env].get('all_certs_match'):
+            current_state[env]['all_certs_match'] = False
+        
+        if not current_state[env].get('master_cert'):
+            current_state[env]['master_cert'] = None
+        
+        if not current_state[env].get('master_key'):
+            current_state[env]['master_key'] = None
+        
+        for cluster in current_state[env]['clusters']:
+            if not current_state[env]['clusters'][cluster].get('existing_cert_name'):
+                current_state[env]['clusters'][cluster]['existing_cert_name'] = None
+
+            if not current_state[env]['clusters'][cluster].get('valid_age'):
+                current_state[env]['clusters'][cluster]['valid_age'] = False
+
+            if not current_state[env]['clusters'][cluster].get('matches_master'):
+                current_state[env]['clusters'][cluster]['matches_master'] = False            
+
+            if not current_state[env]['clusters'][cluster].get('apiserver_url'):
+                current_state[env]['clusters'][cluster]['apiserver_url'] = None
+    
+    set_current_state(current_state)
+
+    return
 
 
-def enforce_desired_state(current_state):
+def enforce_desired_state():
 
+    print("Enforcing Desired State...")
+    current_state = cfg.current_state
     # Use while loop later to constantly update the in-memory state of the environments
     #while not current_state[env]['ready']:
 
-    for env in current_state:
+    for env in current_state.keys():
 
         ######## (1) Represent state of cluster certs in-memory for current env  #######
         # check state of clusters and certs; push state info into current_state{}
@@ -649,23 +644,25 @@ def enforce_desired_state(current_state):
             print("Retrieving existing cluster certs, if any...")
             cluster_certs = get_existing_certs(cluster_name=cluster, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token']) # returns list[]
             
-            print("Determining state of clusters and certs for current env. env={}".format(env))
             # outofsync if cert is not deployed
             if not cluster_certs:
+                print("No existing certs found. New certs will be deployed...")
                 # case) no cert exists, therefore cert is also invalid
-                current_state[env]['clusters'][cluster]['existing_cert'] = None
+                current_state[env]['clusters'][cluster]['existing_cert_name'] = None
                 current_state[env]['clusters'][cluster]['valid_age'] = False
 
             else:
-                # cert exists, therefore assign newest cert from list (index 0) to 'existing_cert'
-                current_state[env]['clusters'][cluster]['existing_cert'] = cluster_certs[0]
+                # cert exists, therefore assign newest cert from list (index 0) to 'existing_cert_name'
+                print("Certs found for current env. Validating age...")
+                current_state[env]['clusters'][cluster]['existing_cert_name'] = cluster_certs[0]
 
                 # check validity of cert age, and assign the result
-                if is_valid_age( get_secret_age( cluster_certs[0], cluster_name=cluster ) ):
+                if is_valid_age( get_secret_age( cluster_certs[0], apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token'] ) ):
                     print("Certs are still valid, not greater than 100 days old. Flag to ensure consistency then pull into container.")
                     current_state[env]['clusters'][cluster]['valid_age'] = True
                 else:
                     # is_valid_age() returned False, so assign False
+                    print("Certs are not valid, a new certificate will be deployed")
                     current_state[env]['clusters'][cluster]['valid_age'] = False
 
         ######## (2) Set state of master_cert in-memory for current env  #######
@@ -676,11 +673,15 @@ def enforce_desired_state(current_state):
 
             # recursively attempt to fetch a valid cert from one of the current cluster states in current_state{}
             for cluster in current_state[env]['clusters']:
-                # 'existing_cert' contains the name of the secret which contains the certificate and key
-                secret_name = current_state[env]['clusters'][cluster]['existing_cert']
+
+                creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
+
+                # 'existing_cert_name' contains the name of the secret which contains the certificate and key
+                secret_name = current_state[env]['clusters'][cluster]['existing_cert_name']
                 valid = current_state[env]['clusters'][cluster]['valid_age']
-                if current_state[env]['clusters'][cluster]['existing_cert'] is not None and valid:
-                    master_cert, master_key = fetch_cert_key_from_secret(secret_name, cluster_name=cluster)
+                if current_state[env]['clusters'][cluster]['existing_cert_name'] is not None and valid:
+                    print("Certificate found in current env. Setting Master cert and key...")
+                    master_cert, master_key = fetch_cert_key_from_secret(secret_name, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token'] )
                     current_state[env]['master_cert'] = master_cert
                     current_state[env]['master_key'] = master_key
                     break
@@ -689,8 +690,9 @@ def enforce_desired_state(current_state):
 
             # if no valid cert is retrieved, generate a new one
             try:
-                # master_cert and master_key are created as a pair... if one exists, but not the other, we will overwrite both with a new pair
-                current_state[env]['master_cert'], current_state[env]['master_key'] = create_new_cert()
+                if not current_state[env]['master_cert'] or not current_state[env]['master_key']:
+                    # master_cert and master_key are created as a pair... if one exists, but not the other, we will overwrite both with a new pair
+                    current_state[env]['master_cert'], current_state[env]['master_key'] = create_new_cert()
                 
                 # validate master_cert and master_key MUST NOT be empty strings or None
                 assert current_state[env]['master_key'], "Missing Value: Empty string or null value @ key = current_state[{}]['master_key']".format(env)
@@ -705,19 +707,21 @@ def enforce_desired_state(current_state):
         ######## (2.1) Compare cluster certs to master_cert for current env ########
         print('Comparing cluster certs with known master certs for current env...')
         for cluster in current_state[env]['clusters']:
-            secret_name = current_state[env]['clusters'][cluster]['existing_cert']
 
             # if secret_name is empty, or secret_name is known, but cluster_cert does not match, set matches_master to False
-            if not secret_name:
-               current_state[env]['clusters'][cluster]['matches_master'] = False
+            if not current_state[env]['clusters'][cluster]['existing_cert_name']:
+                print("WARN: cluster={} existing_cert_name is empty or None, Does NOT match master state...".format(cluster))
+                current_state[env]['clusters'][cluster]['matches_master'] = False
             else:
                 # get credentials for current cluster
                 creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
                 cluster_cert, cluster_key = fetch_cert_key_from_secret( secret_name, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'] )
                 
                 if cluster_cert == current_state[env]['master_cert'] and cluster_key == current_state[env]['master_key']:
+                    print("INFO: cluster={} is in sync with master state for current env".format(cluster))
                     current_state[env]['clusters'][cluster]['matches_master'] = True
                 else:
+                    print("WARN: cluster={} is NOT in sync with master state for current env".format(cluster))
                     current_state[env]['clusters'][cluster]['matches_master'] = False
 
 
@@ -733,9 +737,9 @@ def enforce_desired_state(current_state):
             # 3. for all clusters, existing_cert matches master_cert
             # AND if all clusters have existing_cert=master_cert
       
-        # dict() of cluster->'existing_cert' value mappings in current env 
+        # dict() of cluster->'existing_cert_name' value mappings in current env 
         # sample data: { 'sat-ocp-dev': '-----BEGIN CERTIFICATE-----....', ... }
-        existing_cert_results = { cluster : current_state[env]['clusters'][cluster]['existing_cert'] for cluster in current_state[env]['clusters'] }
+        existing_cert_results = { cluster : current_state[env]['clusters'][cluster]['existing_cert_name'] for cluster in current_state[env]['clusters'] }
 
         # dict() of cluster->True/False value mappings in current env 
         # sample data: { 'sat-ocp-dev': False, ... }
@@ -793,9 +797,9 @@ def enforce_desired_state(current_state):
             deploy_targets = []
             
             for cluster in current_state[env]['clusters']:
-                # All 3 cluster conditions ('existing_cert','valid_age','matches_master') must evaluate to True,
+                # All 3 cluster conditions ('existing_cert_name','valid_age','matches_master') must evaluate to True,
                 # otherwise the cluster cert will be redeployed using 'master_cert'
-                if all([ current_state[env]['clusters'][cluster]['existing_cert'], 
+                if all([ current_state[env]['clusters'][cluster]['existing_cert_name'], 
                          current_state[env]['clusters'][cluster]['valid_age'], 
                          current_state[env]['clusters'][cluster]['matches_master'] ]):
                     pass # do nothing because cluster is fine
@@ -807,10 +811,10 @@ def enforce_desired_state(current_state):
                 # deploy master cert 
                 creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
                 name = "sealing-secret-{}".format(create_uuid())
-                deploy_cert(secret_name=name, from_master=True, env=env, current_state=current_state, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'])
+                deploy_cert(secret_name=name, from_master=True, env=env, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'])
                 
                 # TODO: add validations... Just blindly assuming that the cert exists, even if the deploy_cert() operation fails
-                #current_state[env]['clusters'][cluster]['existing_cert'] = current_state[env]['master_cert']
+                #current_state[env]['clusters'][cluster]['existing_cert_name'] = current_state[env]['master_cert']
                 current_state[env]['clusters'][cluster]['valid_age'] = True
                 current_state[env]['clusters'][cluster]['matched_master'] = True
         else:
@@ -818,4 +822,14 @@ def enforce_desired_state(current_state):
             # so skip to next env in loop
             continue
 
+    set_current_state(current_state)
+
     return
+
+def set_current_state(current_state):
+    cfg.current_state = current_state
+    print("set_current_state()")
+    return
+
+def get_current_state():
+    return cfg.current_state
