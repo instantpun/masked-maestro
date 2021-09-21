@@ -1,7 +1,4 @@
-import threading
-import dateutil.parser
-import datetime
-from base64 import urlsafe_b64encode, b64decode, b64encode
+# standard libs #
 import sys
 import os
 import re
@@ -9,7 +6,12 @@ import yaml, json
 from contextlib import contextmanager
 import subprocess
 import io
-# from cfg import current_state, global_vars
+import threading
+import dateutil.parser
+import datetime
+from base64 import urlsafe_b64encode, b64decode, b64encode
+
+# custom libs #
 import cfg
 
 INVENTORY_PATH = cfg.INVENTORY_PATH
@@ -152,38 +154,7 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
             output = proc.stdin.write(outfile.read())
             proc.stdin.close()
             proc.wait()
-        # p2_cmd = deployCmd
-        # p2 = subprocess.Popen(p2_cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, shell=True)
-        # #p2_out, p2_err = p2.communicate( input=outfile )
-        # p2_out = p2.stdin.write(outfile.read())
-        # p2.stdin.close()
-        # p2.wait()
-        #output = p2_out.decode().strip()
-    print(output)
 
-
-    # with run_subprocess(deployCmd) as proc:
-    #     # covert tls_signer_secret to yaml-formatted text and send to cli command stdin
-    #     # communicate() returns a 2-tuple of bytes objects, 0 = stdin, 1 = stderr
-    #     # Note: in python 3.4+, input to stdin must be encoded as bytes
-    #     input_yaml = yaml.dump(tls_signer_secret)
-    #     print("secret_result:\n" + input_yaml)
-    #     # if isinstance(input_yaml, str):
-    #     #     input_yaml = input_yaml.encode()
-
-    #     out, err = proc.communicate( input=input_yaml )
-        
-    #     # tls_secret = yaml.dump(tls_signer_secret)
-    #     # print(tls_secret)
-    #     # proc.stdin.write(tls_secret)
-    #     # proc.stdin.flush()
-
-    #     # output = proc.stdout.read()
-    #     print(out)
-    #     returncode = proc.returncode
-
-    #     # stderr will be logged by the run_subprocess() context manager
-        
     return None
         
 
@@ -203,11 +174,7 @@ def delete_ss_pod(apiserver_url=None, apiserver_token=None):
     return returncode
 
 
-# def is_valid_age(age) -> bool:
-#     '2021-09-20T15:31:20Z'
-
-
-def is_valid_age(age) -> bool:
+def is_valid_age(age, time_format="ISO") -> bool:
     """
     :param age: A string which should match the pattern '[0-9][0-9][0-9][ydms]'
     :type: str
@@ -218,39 +185,41 @@ def is_valid_age(age) -> bool:
     # age must be a string at this time
     assert isinstance(age, str), "func: is_valid_age(), param: age, age must be of type str()"
 
-    # convert k8s ISO-formatted timestamp to common datetime object
-    age_dt = dateutil.parser.isoparse(age)
+    if time_format == "ISO":
+        # convert k8s ISO-formatted timestamp to common datetime object
+        age_dt = dateutil.parser.isoparse(age)
 
-    # set expiration time to 100days prior to now
-    expiry_dt = datetime.datetime.now() - datetime.timedelta(days=100)
+        # set expiration time to 100days prior to now
+        expiry_dt = datetime.datetime.now() - datetime.timedelta(days=100)
 
-    if age_dt.timestamp() <= expiry_dt.timestamp():
-        return False
-    else:
-        return True        
+        if age_dt.timestamp() <= expiry_dt.timestamp():
+            return False
+        else:
+            return True        
 
-
-    # # age is in the format of NNNI, where I is the interval and N is the number
-    # # e.g. 17s = 17 seconds, 3m = 3 minutes, 50d = 50 days, 1y = 1 year
-    # # X seconds or X minutes is too new, therefore always valid
-    # if age.endswith('s') or age.endswith('m') or age.endswith('h'):
-    #     return True
-    # # X years > 100 days and is too old, therefore always invalid
-    # elif age.endswith('y'):
-    #     return False
-    # elif age.endswith('d'):
-    #     # age is a string with format 'NNNI'
-    #     # age[:-1] gives the substring 'NNN'
-    #     # if age[:-1] converts to a number equal to or greater than 100, then age is invalid
-    #     if int(age[:-1]) >= 100:
-    #         return False
-    #     else:
-    #         return True
-    # else:
-    #     # returns false generally, if str doesn't match the expected 'NNNI' format
-    #     print("WARN: func: is_valid_age(), param: age, 'age' does not match any expected format. 'age' is assumed to be invalid")
-    #     print(age)
-    #     return False
+    # TODO: Discuss if parsing HR format is even needed
+    if time_format == "HR": # human-readable
+        # age is in the format of NNNI, where I is the interval and N is the number
+        # e.g. 17s = 17 seconds, 3m = 3 minutes, 50d = 50 days, 1y = 1 year
+        # X seconds or X minutes is too new, therefore always valid
+        if age.endswith('s') or age.endswith('m') or age.endswith('h'):
+            return True
+        # X years > 100 days and is too old, therefore always invalid
+        elif age.endswith('y'):
+            return False
+        elif age.endswith('d'):
+            # age is a string with format 'NNNI'
+            # age[:-1] gives the substring 'NNN'
+            # if age[:-1] converts to a number equal to or greater than 100, then age is invalid
+            if int(age[:-1]) >= 100:
+                return False
+            else:
+                return True
+        else:
+            # returns false generally, if str doesn't match the expected 'NNNI' format
+            print("WARN: func: is_valid_age(), param: age, 'age' does not match any expected format. 'age' is assumed to be invalid")
+            print(age)
+            return False
 
 def get_secret_age(secret_name=None, apiserver_url=None, apiserver_token=None) -> bool:
     """
@@ -863,9 +832,4 @@ def set_current_state(current_state):
     return
 
 def get_current_state():
-    # global current_state
-    # return current_state
     return cfg.current_state
-
-# if __name__ == '__main__':
-#     print(dir(cfg))

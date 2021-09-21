@@ -1,10 +1,13 @@
-##### List of defined API routes within Flask #####
+# standard libs #
 import os
-# Import flask and template operators
+
+# 3rd party libs #
 from flask import Flask, render_template, request
 import requests
-# from webapp.cfg import current_state, global_vars
+
+# custom libs #
 import controller as ctl
+
 # Define the WSGI application object
 app = Flask(__name__)
 
@@ -14,6 +17,7 @@ class NotFoundError(Exception):
   code = 404
   description = "Resource Not Found"
 
+##### List of defined API routes within Flask #####
 @app.route('/', methods = ['POST', 'GET'])
 def data():
   current_state = ctl.get_current_state()
@@ -22,6 +26,7 @@ def data():
     for cluster in current_state[env]['clusters']:
       cluster_list.append(cluster)
 
+  #TODO: Fix request object
   if request.method == 'GET':
       return render_template('form.html', clusters = cluster_list)
   if request.method == 'POST':
@@ -72,6 +77,3 @@ def cert(env):
     except NotFoundError as err:
       # render empty string, and respond with HTTP 404 code
       return "Page Not Found", 404
-    #  print(f'HTTP error occurred: {http_err}')  # Python 3.6
-    # except Exception as err:
-    #   print(f'Other error occurred: {err}')  # Python 3.6
