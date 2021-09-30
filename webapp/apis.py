@@ -17,6 +17,11 @@ class NotFoundError(Exception):
   code = 404
   description = "Resource Not Found"
 
+def make_thread():
+  global my_timer
+  my_timer = threading.Timer(2592000, make_thread)
+  pass #TODO: call cert rotation function
+
 ##### List of defined API routes within Flask #####
 @app.route('/', methods = ['POST', 'GET'])
 def data():
@@ -31,7 +36,11 @@ def data():
       return render_template('form.html', clusters = cluster_list)
   if request.method == 'POST':
       form_data = request.form.to_dict()
-      command = "/usr/bin/echo -n " + form_data["String"] + " | kubeseal --raw --scope cluster-wide --from-file=/dev/stdin --cert " + directory + "/" + form_data["cluster"] + ""
+      command = " ".join(["/usr/bin/echo -n {}".format(form_data["String"]),
+                          "|",
+                          "kubeseal --raw --scope cluster-wide --from-file=/dev/stdin", 
+                          "--cert {}/{}".format(directory, form_data["cluster"])
+                        ])
       encryptedSecret = os.popen(command).read()
       return encryptedSecret
 
