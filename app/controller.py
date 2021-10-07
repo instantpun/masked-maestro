@@ -1,15 +1,21 @@
 # standard libs #
 import sys
 import os
-import re
-import yaml, json
-from contextlib import contextmanager
+import json
 import subprocess
 import io
-import threading
-import dateutil.parser
 import datetime
+import errno
+import shlex
+
+from contextlib import contextmanager
+from random import choices
+from string import ascii_lowercase, ascii_uppercase, digits
 from base64 import urlsafe_b64encode, b64decode, b64encode
+
+# 3rd party libs #
+import yaml
+import dateutil.parser
 
 # custom libs #
 import cfg
@@ -24,28 +30,49 @@ def timestamped_print(*args, **kwargs):
 
 print = timestamped_print
 
+
+
+### custom Exceptions ###
+class ProcessError(Exception):
+    def __init__(self, cmd="", code=None, msg=""):
+        self.code = code
+        # grab only the first argument
+        if isinstance(cmd, str):
+            self.cmd = shlex.split(cmd)[0]
+        elif isinstance(Cmd, list) and cmd[0]:
+            self.cmd = cmd[0]
+        else:
+            self.cmd = cmd
+        self.msg = msg
+        super().__init__(self.msg)
+
+    def __str__(self):
+        return f'ERROR: {self.msg} -- Process {self.cmd} exited with code {self.code} = {errno.errorcode[self.code]}'
+
+
+### custom context managers ###
+
 @contextmanager
 def run_subprocess(cmd, **kwargs):
 
-    # spawn new process
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, universal_newlines=True, shell=True, **kwargs)
-    # Context breakdown, and yield control to calling function
-    yield proc
-    # when calling function exits, resume run_process context:
-    
     try:
-        # To check if a process has terminated, call subprocess.Popen.poll() with subprocess.Popen as the process.
-        # If a None value is returned, it indicates that the process hasn’t terminated yet.
-        # CLEANUP: if calling function has exited, then terminate current process to prevent zombie attacks :P
-        if proc.poll() is not None:
-            proc.terminate()
+        # spawn new process
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, shell=True, **kwargs)
+        # Context breakdown, and yield control to calling function
+        yield proc
+        # when calling function exits, resume run_process context:
+
+        out, err = proc.communicate()
+        # communicate() waits for process to complete if it hasn't already, and terminates it. Should help prevent zombie attacks :P
 
         # emit warning message if process terminated with an unsuccessful return code
-        if proc.returncode != 0:
-            print("WARN: Process \'{}\' terminated with code {}".format(cmd, proc.returncode) + "\n")
+        if proc.returncode > 0:
+            raise ProcessError(cmd = cmd, code = proc.returncode, msg = err)
     except AttributeError as err: #TODO - improve lazy error handling
         print(err)
-        pass
+    except ProcessError as err:
+        print(err)
+
 
 
 def yaml_file_to_dict(path) -> dict:
@@ -152,8 +179,6 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     with io.StringIO(input_json) as outfile:
         with run_subprocess(deployCmd) as proc:
             output = proc.stdin.write(outfile.read())
-            proc.stdin.close()
-            proc.wait()
 
     return None
         
@@ -531,16 +556,18 @@ def config_to_state(config=None) -> dict:
 
     return
 
-def create_uuid() -> str:
+def create_uuid(size=6, base64=False) -> str:
     """
-    generates and returns a new, 6-character UUID 
+    generates and returns a new, 8-character UUID 
 
-    :return UUID: string containing 6 random alphanumeric characters
+    :return UUID: string containing 8 random alphanumeric characters
     :type: str
     """
-    uuidTmp = urlsafe_b64encode(os.urandom(6)).decode('utf-8').lower()
+
+    char_set = ascii_lowercase + asciii_uppercase + digits
+
     # enforce alphanumeric chars in UUID: strip any character that does not occur in the set [A-Za-z0-9]
-    uuid = re.sub('[^A-Za-z0-9]+', '', uuidTmp)
+    uuid = ''.join(choices(char_set, k=size))
     
     return uuid
 

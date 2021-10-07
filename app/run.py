@@ -44,7 +44,5 @@ def main():
 
 # if __name__ == '__main__':
 
-# print(cfg.current_state)
 main()
-apis.app.run(host='0.0.0.0', port=8080, debug=True)
-# print(cfg.current_state)
+apis.app.run(host='0.0.0.0', port=5000, debug=True)
