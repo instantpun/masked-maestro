@@ -14,6 +14,7 @@ from base64 import urlsafe_b64encode, b64decode, b64encode
 # custom libs #
 import cfg
 
+DEBUG = cfg.DEBUG
 INVENTORY_PATH = cfg.INVENTORY_PATH
 WILDCARD_DOMAIN = cfg.WILDCARD_DOMAIN
 
@@ -23,6 +24,17 @@ def timestamped_print(*args, **kwargs):
   old_print(datetime.datetime.now(), *args, **kwargs)
 
 print = timestamped_print
+
+class ProcessError(Exception):
+    def __init__(self, cmd="", retcode="Unknown", msg=""):
+        self.retcode = retcode
+        self.cmd = cmd
+        self.message = msg
+        super().__init__(self.message)
+
+    def __str__(self):
+        return f'WARN: return code {self.retcode}, stderr: {self.message}; Error handling the following process: {self.cmd}'
+
 
 @contextmanager
 def run_subprocess(cmd, **kwargs):
@@ -41,11 +53,14 @@ def run_subprocess(cmd, **kwargs):
             proc.terminate()
 
         # emit warning message if process terminated with an unsuccessful return code
-        if proc.returncode != 0:
-            print("WARN: Process \'{}\' terminated with code {}".format(cmd, proc.returncode) + "\n")
+        if proc.returncode != 0 and err:
+            raise ProcessError(cmd=cmd, retcode=proc.returncode, msg=err)
+        elif not err and proc.returncode != 0:
+            raise ProcessError(cmd=cmd, retcode=proc.returncode, msg='stderr buffer is empty')
     except AttributeError as err: #TODO - improve lazy error handling
         print(err)
-        pass
+    except ProcessError as err:
+        print(err)
 
 
 def yaml_file_to_dict(path) -> dict:
