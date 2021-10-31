@@ -1,5 +1,10 @@
 # standard libs #
 import os
+import subprocess
+import shlex
+
+from random import choices
+from string import ascii_lowercase, digits
 
 # 3rd party libs #
 from flask import Flask, render_template, request
@@ -20,21 +25,63 @@ class NotFoundError(Exception):
 ##### List of defined API routes within Flask #####
 @app.route('/', methods = ['POST', 'GET'])
 def data():
-  current_state = ctl.get_current_state()
-  cluster_list = []
-  for env in current_state:
-    for cluster in current_state[env]['clusters']:
-      cluster_list.append(cluster)
+    current_state = ctl.get_current_state()
+    cert_map = {}
 
-  #TODO: Fix request object
-  if request.method == 'GET':
-      return render_template('form.html', clusters = cluster_list)
-  if request.method == 'POST':
-      form_data = request.form.to_dict()
-      command = "/usr/bin/echo -n " + form_data["String"] + " | kubeseal --raw --scope cluster-wide --from-file=/dev/stdin --cert " + directory + "/" + form_data["cluster"] + ""
-      encryptedSecret = os.popen(command).read()
-      return encryptedSecret
+    for env in current_state:
+        for cluster in current_state[env]['clusters']:
+            if isinstance(current_state[env]['master_cert'].decode(), bytes):
+                cert = current_state[env]['master_cert'].decode()
+            else:
+                cert = current_state[env]['master_cert']
+            cert_map.update({cluster: cert})
+  
+    cluster_list = cert_map.keys()
 
+    if request.method == 'GET':
+        return render_template('form.html', clusters = cluster_list)
+    if request.method == 'POST':
+        form_data = request.form.to_dict()
+
+        uuid = ''.join(choices(ascii_lowercase + digits, k=8))
+        tmpfile = f'/tmp/cert-{uuid}'
+
+        try:
+            with open(tmpfile, 'w') as f:
+                f.write(cert)
+          
+            # used for input to stdin pipe
+            stdin_data = form_data["String"].encode() if isinstance(form_data["String"], str) else form_data["String"]
+            
+            # raw command
+            seal_cmd = f"/usr/local/bin/kubeseal --raw --scope cluster-wide  --from-file=/dev/stdin --cert={tmpfile}"
+
+            # safely split into list of shell args
+            cmd = shlex.split(seal_cmd)
+
+            with subprocess.Popen(cmd, stdout=subprocess.PIPE, stdin=subprocess.PIPE) as proc:
+                
+                # write user input to stdin & execute
+                proc.stdin.write(stdin_data)
+                out, err = proc.communicate()
+
+            result = out.decode() if isinstance(out, bytes) else out
+
+            if proc.returncode > 0:
+                print(err)
+
+            # simple html to diplay word wrap string
+            response_template = f"""<p style="word-wrap: break-word; word-break: break-all;">
+{result}
+</p>
+"""
+
+        finally:
+            # ensure tmpfile is always deleted
+            if os.path.exists(tmpfile):
+                os.remove(tmpfile)
+
+        return response_template
 
 @app.route('/template')
 def template():
