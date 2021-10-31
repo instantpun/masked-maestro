@@ -26,15 +26,17 @@ class NotFoundError(Exception):
 @app.route('/', methods = ['POST', 'GET'])
 def data():
     current_state = ctl.get_current_state()
+
+    # mapping of cluster -> master_cert
     cert_map = {}
 
     for env in current_state:
         for cluster in current_state[env]['clusters']:
-            if isinstance(current_state[env]['master_cert'].decode(), bytes):
-                cert = current_state[env]['master_cert'].decode()
+            if isinstance(current_state[env]['master_cert'], bytes):
+                cert = current_state[env]['master_cert'].decode('utf-8')
             else:
                 cert = current_state[env]['master_cert']
-            cert_map.update({cluster: cert})
+            cert_map.update( { cluster: cert } )
   
     cluster_list = cert_map.keys()
 
@@ -50,7 +52,7 @@ def data():
             with open(tmpfile, 'w') as f:
                 f.write(cert)
           
-            # used for input to stdin pipe
+            # stdin pipe use later, requires bytes as input
             stdin_data = form_data["String"].encode() if isinstance(form_data["String"], str) else form_data["String"]
             
             # raw command
