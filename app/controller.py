@@ -78,7 +78,6 @@ def yaml_file_to_dict(path) -> dict:
     # validate yaml file extension
     assert (path.endswith('.yaml') or path.endswith('.yml')), "func: yaml_file_to_dict(), param: path, path must be a yaml file with .yaml or .yml file extension!"
 
-    # load config from 'path' variable
     with open(path, 'r') as f:
         # safe_load() is more secure; the parser won't evaluate code snippets inside yaml
         # safe_load() reads the file stream and converts yaml formatted text to a python dict() object
@@ -90,22 +89,22 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param cert: The raw TLS certificate, which will be included in the k8s secret
+    :param cert: The raw TLS certificate, which will be included in the k8s secret.
     :type: str
 
-    :param key: The raw pem-formatted key associated with cert, which will be included in the k8s secret
+    :param key: The raw pem-formatted key associated with cert, which will be included in the k8s secret.
     :type: str
 
-    :param from_master: If True, deploy_cert() will attempt to create a k8s secret using the master_cert and master_key stored in-memory
+    :param from_master: If True, deploy_cert() will attempt to create a k8s secret using the master_cert and master_key stored in-memory.
     :type: bool
 
-    :param secret_name: The name of the resulting k8s secret resource
+    :param secret_name: The name of the resulting k8s secret resource.
     :type: str
 
-    :param apiserver_url: TODO
+    :param apiserver_url: Must be a valid k8s api server address. 
     :type: str
 
-    :param apiserver_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
+    :param apiserver_token: Must be a valid k8s API token. Token must provide read-write access to secrets within the destination cluster and namespace.
     :type: str
     """
 
@@ -240,13 +239,13 @@ def get_secret_age(secret_name=None, apiserver_url=None, apiserver_token=None) -
     """
     Check if the provided cert is more than 100days old
 
-    :param secret_name: name of the secret which will be examined
+    :param secret_name: name of the secret which will be fetched and evaluated.
     :type: str
 
-    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
+    :param apiserver_url: Must be a valid k8s api server address. 
     :type: str
 
-    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
+    :param apiserver_token: Must be a valid k8s API token. Token must provide read-write access to secrets within the destination cluster and namespace.
     :type: str
 
     :return secret_age: the age of the secret resource which matches the provided parameters. 'age' is a string which should match the pattern '[0-9][0-9][0-9][ydms]'
@@ -298,13 +297,13 @@ def fetch_cert_key_from_secret(secret_name=None, apiserver_url=None, apiserver_t
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param secret_name: TODO
+    :param secret_name: name of the secret which will be fetched and evaluated.
     :type: str
 
-    :param apiserver_url: TODO
+    :param apiserver_url: Must be a valid k8s api server address. 
     :type: str
 
-    :param apiserver_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
+    :param apiserver_token: Must be a valid k8s API token. Token must provide read-write access to secrets within the destination cluster and namespace.
     :type: str
 
     :return cert_key: Tuple contains two strings (1) the plaintext certificate and (2) the plaintext pem-formatted key retrieved from the provided secret
@@ -444,10 +443,13 @@ def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=No
     """
     Checks for any existing sealed secret certs inside a specific cluster
 
-    :param cluster_name: must correspond to one of the name aliases defined in the inventory file
+    :param secret_name: name of the secret which will be fetched and evaluated.
     :type: str
 
-    :param cluster_token: must be a valid kubenetes API token. Token must provide read-write access to secrets within the destination cluster and namespace
+    :param apiserver_url: Must be a valid k8s api server address. 
+    :type: str
+
+    :param apiserver_token: Must be a valid k8s API token. Token must provide read-write access to secrets within the destination cluster and namespace.
     :type: str
 
     :return existing_certs: TODO
@@ -496,9 +498,10 @@ def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=No
 def config_to_state(config=None) -> dict:
     """
     Parses dict() of inventory config, and creates an index of environment->cluster data mappings
+    Assigns mapping to cfg.current_state
 
-    :return initial_env_state: The mapping of environment names to cluster names and config. Represents an indexing of 'shared_env' fields from the yaml inventory file.
-    :type: dict
+    :return None:
+    :type: NoneType
     """
 
     print('Building initial state from inventory...')
