@@ -21,6 +21,7 @@ import dateutil.parser
 import cfg
 
 DEBUG = cfg.DEBUG
+K8S_TEMPLATE_PATH = cfg.K8S_TEMPLATE_PATH
 INVENTORY_PATH = cfg.INVENTORY_PATH
 WILDCARD_DOMAIN = cfg.WILDCARD_DOMAIN
 
@@ -31,8 +32,6 @@ def timestamped_print(*args, **kwargs):
 
 print = timestamped_print
 
-
-
 ### custom Exceptions ###
 class ProcessError(Exception):
     def __init__(self, cmd="", code=None, msg=""):
@@ -40,15 +39,15 @@ class ProcessError(Exception):
         # grab only the first argument
         if isinstance(cmd, str):
             self.cmd = shlex.split(cmd)[0]
-        elif isinstance(Cmd, list) and cmd[0]:
+        elif isinstance(cmd, list) and cmd[0]:
             self.cmd = cmd[0]
         else:
-            self.cmd = cmd
-        self.msg = msg
+            self.cmd = "Unknown"
+        self.msg = 'stderr buffer is empty' if not msg else msg
         super().__init__(self.msg)
 
     def __str__(self):
-        return f'ERROR: {self.msg} -- Process {self.cmd} exited with code {self.code} = {errno.errorcode[self.code]}'
+        return f'ERROR: {self.msg} -- Process {self.cmd} exited with code {self.code}. Code Description = {errno.errorcode[self.code]}'
 
 
 ### custom context managers ###
@@ -67,23 +66,14 @@ def run_subprocess(cmd, **kwargs):
         # communicate() waits for process to complete if it hasn't already, and terminates it. Should help prevent zombie attacks :P
 
         # emit warning message if process terminated with an unsuccessful return code
-<<<<<<< HEAD
-        if proc.returncode != 0 and err:
-            raise ProcessError(cmd=cmd, retcode=proc.returncode, msg=err)
-        elif not err and proc.returncode != 0:
-            raise ProcessError(cmd=cmd, retcode=proc.returncode, msg='stderr buffer is empty')
-=======
         if proc.returncode > 0:
             raise ProcessError(cmd = cmd, code = proc.returncode, msg = err)
->>>>>>> a016aa2d479fefce48cc0101c7b52ee5360cf280
+        elif not err and proc.returncode > 0:
+            raise ProcessError(cmd = cmd, code = proc.returncode, msg = 'stderr buffer is empty')
     except AttributeError as err: #TODO - improve lazy error handling
         print(err)
     except ProcessError as err:
         print(err)
-<<<<<<< HEAD
-=======
-
->>>>>>> a016aa2d479fefce48cc0101c7b52ee5360cf280
 
 
 def yaml_file_to_dict(path) -> dict:
@@ -161,10 +151,14 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     tls_signer_secret['metadata']['name'] = secret_name
 
     # cert must be in standard PEM format, and base64 encoded
-    tls_signer_secret['data']['tls.crt'] = b64encode(current_state[env]['master_cert'].encode('utf-8') ).decode('utf-8') if from_master else cert
+    tls_crt = master_cert if from_master else cert
+    tls_crt = b64decode( tls_crt.encode() ).decode()
+    tls_signer_secret['data']['tls.crt'] = tls_crt
 
     # key must be in unencrypted PEM format, and base64 encoded
-    tls_signer_secret['data']['tls.key'] = b64encode(current_state[env]['master_key'].encode('utf-8') ).decode('utf-8')  if from_master else key
+    tls_key = master_key if from_master else key
+    tls_key = b64decode( tls_key.encode() ).decode()
+    tls_signer_secret['data']['tls.key'] = tls_key
 
     # set custom labels
     labels = { "sealedsecrets.bitnami.com/sealed-secrets-key": "active"
@@ -184,30 +178,29 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
     
     # setup process
     deployCmd = " ".join([ "oc create",
-                         "--token={}".format(apiserver_token),
-                         "--server={}".format(apiserver_url),
+                         f"--token={apiserver_token}",
+                         f"--server={apiserver_url}",
                          "--insecure-skip-tls-verify",
                          "--namespace sealed-secrets",
                          "--filename=-"
                        ])
-    #print(tls_signer_secret['data']['tls.crt'])
+
     input_json = json.dumps(tls_signer_secret)
-    #print("secret_result:\n" + input_json)
+
     print("Distributing Cert to " + apiserver_url)
 
     with io.StringIO(input_json) as outfile:
         with run_subprocess(deployCmd) as proc:
             output = proc.stdin.write(outfile.read())
 
-    return None
-        
+    return None        
 
 def delete_ss_pod(apiserver_url=None, apiserver_token=None):
 
     delCmd = " ".join([ "oc delete pod",
                          "-l name=sealed-secrets-controller",
-                         "--token={}".format(apiserver_token),
-                         "--server={}".format(apiserver_url),
+                         f"--token={apiserver_token}",
+                         f"--server={apiserver_url}",
                          "--insecure-skip-tls-verify",
                          "--namespace sealed-secrets",
                        ])
@@ -302,15 +295,11 @@ def get_secret_age(secret_name=None, apiserver_url=None, apiserver_token=None) -
     cmd = " ".join(["oc get secret",
                      secret_name,
                      "-o jsonpath='{.metadata.creationTimestamp}'",
-                     "--token={}".format(apiserver_token),
-                     "--server={}".format(apiserver_url),
+                    f"--token={apiserver_token}",
+                    f"--server={apiserver_url}",
                      "--insecure-skip-tls-verify",
                      "--namespace sealed-secrets",
                 ])
-                #      "| grep {} ".format(secret_name),
-                #      "| awk \'{print $4}\'"
-                #      "| head -n 1"
-                #    ])
                     #     "| awk \'match($4,/1[0-9][0-9]+d/) {print $1}\'"
                     # ])
 
@@ -336,43 +325,57 @@ def fetch_cert_key_from_secret(secret_name=None, apiserver_url=None, apiserver_t
     :param apiserver_token: Must be a valid k8s API token. Token must provide read-write access to secrets within the destination cluster and namespace.
     :type: str
 
-    :return cert_key: Tuple contains two strings (1) the plaintext certificate and (2) the plaintext pem-formatted key retrieved from the provided secret
+    :return (cert, key): Tuple contains two strings (1) the plaintext certificate and (2) the plaintext pem-formatted key retrieved from the provided secret
     :type: tuple(str, str)
     """
 
-    assert secret_name, "func: fetch_cert_key_from_secret, param: secret_name -- 'secret_name' must be a non-empty string"
-    if not isinstance(secret_name, str):
-        secret_name = str(secret_name) # enforce str() typing
+    cert = None
+    key = None
 
-    # when 'cmd' executes, it will:
-    # retrieve the name of a specific k8s secret
-    # from the namespace 'sealed-secrets'
-    # ignores mutual TLS handshake (one-way SSL only... we're lazy)
-    #
-    # and requires:
-    # 1. destination api server
-    # 2. auth token
-    certCmd = " ".join([ "oc get secret",
-                         secret_name,
-                         "-o json",
-                         "--namespace sealed-secrets",
-                         "--token={}".format(apiserver_token),
-                         "--server={}".format(apiserver_url),
-                         "--insecure-skip-tls-verify"
-                       ])
-                        #  "| jq -r \'.data.\"tls.crt\"\'",
-                        #  "| base64 -d"
+    try:
+        assert secret_name, "func: fetch_cert_key_from_secret, param: secret_name -- 'secret_name' must be a non-empty string"
+        if not isinstance(secret_name, str):
+            secret_name = str(secret_name) # enforce str() typing
 
-    # spawn process to run oc command, and send output to stdout
-    with run_subprocess(certCmd) as proc:
-        # read command output from stdout, returns str()
-        secret = json.loads( proc.stdout.read() )
+        # when 'cmd' executes, it will:
+        # retrieve the name of a specific k8s secret
+        # from the namespace 'sealed-secrets'
+        # ignores mutual TLS handshake (one-way SSL only... we're lazy)
+        #
+        # and requires:
+        # 1. destination api server
+        # 2. auth token
+        certCmd = " ".join([ "oc get secret",
+                            secret_name,
+                            "-o json",
+                            "--namespace sealed-secrets",
+                            f"--token={apiserver_token}",
+                            f"--server={apiserver_url}",
+                            "--insecure-skip-tls-verify"
+                        ])
+                            #  "| jq -r \'.data.\"tls.crt\"\'",
+                            #  "| base64 -d"
 
-    #TODO: Determine if schema validation is needed:
-    #assert secret.get('type') == 'kubernetes.io/tls', "func: fetch_cert_key_from_secret - field 'type' in secret must be 'kubernetes.io/tls'"
+        # spawn process to run oc command, and send output to stdout
+        with run_subprocess(certCmd) as proc:
+            out = proc.stdout.read()
+            # read command output from stdout, returns str()
+            secret = json.loads( out )
 
-    cert_key = ( b64decode( secret['data']['tls.crt'] ), b64decode( secret['data']['tls.key'] ) )
-    return cert_key
+        #TODO: Determine if schema validation is needed:
+        #assert secret.get('type') == 'kubernetes.io/tls', "func: fetch_cert_key_from_secret - field 'type' in secret must be 'kubernetes.io/tls'"
+
+        # b64decode accepts str() and bytes(), but returns bytes()
+        # need str() for later
+        cert = b64decode( secret['data']['tls.crt'] ).decode()
+        key = b64decode( secret['data']['tls.crt'] ).decode()
+
+    except json.decoder.JSONDecodeError as err:
+        print(err)
+    except KeyError as err:
+        print(err)
+
+    return cert, key
 
 def create_new_cert():
     """
@@ -403,7 +406,7 @@ def create_new_cert():
     if isinstance(raw_output, bytes):
         raw_output = raw_output.decode('utf-8')
 
-    # create list containg line-by-line of raw_output
+    # create list containing line-by-line of raw_output
     lines = raw_output.split("\n")
 
     #print(lines)
@@ -423,7 +426,7 @@ def create_new_cert():
         elif line == '-----END PRIVATE KEY-----':
             priv_key_l.append(line)
             flag = False
-            # set line cursor to skip ahead alrady visited lines in next loop
+            # set line cursor to skip ahead of lines which have already been visited
             cursor = i
             # terminate loop early to set correct cursor value
             break
@@ -486,8 +489,6 @@ def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=No
     :type: list[str]
     """
 
-    assert cluster_name and isinstance(cluster_name, str), "func: get_existing_certs, param: cluster_name -- 'cluster_name' must be a non-empty string"
-
     print("Checking for certs in " + cluster_name)
 
     # when 'cmd' executes, it will:
@@ -506,11 +507,9 @@ def get_existing_certs(cluster_name=None, apiserver_url=None, apiserver_token=No
                     "-l masked-maestro/generated=true",
                     "--namespace sealed-secrets",
                     "--insecure-skip-tls-verify",
-                    "--server {}".format(apiserver_url),
-                    " --token={}".format(apiserver_token)
+                    f"--token={apiserver_token}",
+                    f"--server={apiserver_url}"
               ])
-
-    #print("Checking existing certs with command:\n" + cmd)
 
     existing_certs = []
     # spawn process to run oc command, and send output to stdout
@@ -546,7 +545,7 @@ def config_to_state(config=None) -> dict:
     clusters = config.get('clusters').keys()
 
     # acceptable list of env names:
-    sharedEnvs = ['dev','qa','cap','psp','prod']
+    #sharedEnvs = ['dev','qa','cap','psp','prod']
 
     # initialize empty to dict() for index of envs
     initial_env_state = {}
@@ -555,7 +554,7 @@ def config_to_state(config=None) -> dict:
         # if cluster has active=true in yaml, and shared_env=$env is valid, begin processing
         if config['clusters'][cluster].get('active') is True and config['clusters'][cluster].get('shared_env'):
             # emit error if the provided env is not correct/acceptable
-            assert config['clusters'][cluster]['shared_env'] in sharedEnvs, "ERROR: @ file {inventory}, key clusters.{cluster}.shared_env does not have expected value. Must be one of {envs}".format(inventory=INVENTORY_PATH, cluster=cluster, envs=", ".join(sharedEnvs))
+            # assert config['clusters'][cluster]['shared_env'] in sharedEnvs, "ERROR: @ file {inventory}, key clusters.{cluster}.shared_env does not have expected value. Must be one of {envs}".format(inventory=INVENTORY_PATH, cluster=cluster, envs=", ".join(sharedEnvs))
 
             # edge case:
             # initial_env_state does not contain a key matching the value of config[cluster]['shared_env'], e.g. 'dev' or 'qa'
@@ -632,14 +631,13 @@ def set_defaults_in_state():
     #  ...
     # }
     #
-    # global current_state
-    # global global_vars
+
     current_state = cfg.current_state
     global_vars = cfg.global_vars
     
-    global_vars['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
+    # global_vars['wildcard_domain'] = WILDCARD_DOMAIN if WILDCARD_DOMAIN else None
 
-    #Initialize all envs into a 'not ready' current_state
+    # Initialize all envs into a 'not ready' current_state
     for env in current_state.keys():
         if not current_state[env].get('ready'):
             current_state[env]['ready'] = False
@@ -662,6 +660,12 @@ def set_defaults_in_state():
         for cluster in current_state[env]['clusters']:
             if not current_state[env]['clusters'][cluster].get('existing_cert_name'):
                 current_state[env]['clusters'][cluster]['existing_cert_name'] = None
+
+            if not current_state[env]['clusters'][cluster].get('existing_cert'):
+                current_state[env]['clusters'][cluster]['existing_cert'] = None
+
+            if not current_state[env]['clusters'][cluster].get('existing_key'):
+                current_state[env]['clusters'][cluster]['existing_key'] = None
 
             if not current_state[env]['clusters'][cluster].get('valid_age'):
                 current_state[env]['clusters'][cluster]['valid_age'] = False
@@ -690,28 +694,41 @@ def enforce_desired_state():
         # check state of clusters and certs; push state info into current_state{}
         for cluster in current_state[env]['clusters']:
             
+            #
             creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
-            print("Retrieving existing cluster certs, if any...")
-            cluster_certs = get_existing_certs(cluster_name=cluster, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token']) # returns list[]
+            print("INFO: Retrieving existing cluster certs, if any...")
+            # get_existing_certs -> list()
+            cluster_certs = get_existing_certs(cluster_name=creds['cluster_name'], apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token'])
             
-            # outofsync if cert is not deployed
             if not cluster_certs:
-                print("No existing certs found. New certs will be deployed...")
-                # case) no cert exists, therefore cert is also invalid
+                # special case: no cert exists, therefore cert is also invalid
+                print("WARN: No existing certs found. New certs will be deployed...")
                 current_state[env]['clusters'][cluster]['existing_cert_name'] = None
                 current_state[env]['clusters'][cluster]['valid_age'] = False
 
             else:
-                # cert exists, therefore assign newest cert from list (index 0) to 'existing_cert_name'
+                # general case: cert exists, therefore assign newest cert from list (index 0) to 'existing_cert_name'
                 print("Certs found for current env. Validating age...")
                 current_state[env]['clusters'][cluster]['existing_cert_name'] = cluster_certs[0]
+
+                # load cert and key into memory for later use
+                secret_name = current_state[env]['clusters'][cluster]['existing_cert_name']
+
+                if secret_name:
+                    print(f"INFO: Attempting to load cert in cluser={cluster}")
+                    cluster_cert, cluster_key = fetch_cert_key_from_secret(secret_name, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token'])
+                    current_state[env]['clusters'][cluster]['existing_cert'] = cluster_cert
+                    current_state[env]['clusters'][cluster]['existing_key'] = cluster_key
+                else:
+                    print(f"ERROR: Unable to laod cert found in cluster={cluster}")
+                    # current_state[env]['clusters'][cluster]['existing_cert'] = None
+                    # current_state[env]['clusters'][cluster]['existing_key'] = None
 
                 # check validity of cert age, and assign the result
                 if is_valid_age( get_secret_age( cluster_certs[0], apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token'] ) ):
                     print("Certs are still valid, not greater than 100 days old. Flag to ensure consistency then pull into container.")
                     current_state[env]['clusters'][cluster]['valid_age'] = True
                 else:
-                    # is_valid_age() returned False, so assign False
                     print("Certs are not valid, a new certificate will be deployed")
                     current_state[env]['clusters'][cluster]['valid_age'] = False
 
@@ -719,7 +736,7 @@ def enforce_desired_state():
         # given current env, verify master_cert and master_key is populated inside current_state[env] 
         if not current_state[env]['master_cert'] or not current_state[env]['master_key']:
 
-            print("Master Cert or Key not set, attempting to re-use existing from clusters in current env. env={}".format(env))
+            print(f"Master Cert or Key not set, attempting to re-use existing from clusters in current env. env={env}")
 
             # recursively attempt to fetch a valid cert from one of the current cluster states in current_state{}
             for cluster in current_state[env]['clusters']:
@@ -729,8 +746,9 @@ def enforce_desired_state():
                 # 'existing_cert_name' contains the name of the secret which contains the certificate and key
                 secret_name = current_state[env]['clusters'][cluster]['existing_cert_name']
                 valid = current_state[env]['clusters'][cluster]['valid_age']
-                if current_state[env]['clusters'][cluster]['existing_cert_name'] is not None and valid:
-                    print("Certificate found in current env. Setting Master cert and key...")
+
+                if current_state[env]['master_cert'] and valid:
+                    print(f"INFO: Master cert and key for env={env} will based on cluster={cluster}")
                     master_cert, master_key = fetch_cert_key_from_secret(secret_name, apiserver_url=creds['apiserver_url'], apiserver_token=creds['apiserver_token'] )
                     current_state[env]['master_cert'] = master_cert
                     current_state[env]['master_key'] = master_key
@@ -755,25 +773,23 @@ def enforce_desired_state():
             print("Master Cert and Key found for env. env={}".format(env))
 
         ######## (2.1) Compare cluster certs to master_cert for current env ########
-        print('Comparing cluster certs with known master certs for current env...')
         for cluster in current_state[env]['clusters']:
+            print(f'Comparing cert for cluster={cluster} with known master cert for env={env}...')
+            secret_name = current_state[env]['clusters'][cluster]['existing_cert_name']
+            cert = current_state[env]['clusters'][cluster]['existing_cert']
+            key = current_state[env]['clusters'][cluster]['existing_key']
 
-            # if secret_name is empty, or secret_name is known, but cluster_cert does not match, set matches_master to False
-            if not current_state[env]['clusters'][cluster]['existing_cert_name']:
-                print("WARN: cluster={} existing_cert_name is empty or None, Does NOT match master state...".format(cluster))
-                current_state[env]['clusters'][cluster]['matches_master'] = False
+            if all([ secret_name,
+                    cert == current_state[env]['master_cert'],
+                    key == current_state[env]['master_key']
+            ]):
+                print(f"INFO: cluster=cluster is in sync with master state for env={env}")
+                current_state[env]['clusters'][cluster]['matches_master'] = True
             else:
-                # get credentials for current cluster
-                creds = get_cluster_creds(current_state, env=env, cluster_name=cluster)
-                cluster_cert, cluster_key = fetch_cert_key_from_secret( secret_name, apiserver_url= creds['apiserver_url'], apiserver_token= creds['apiserver_token'] )
-                
-                if cluster_cert == current_state[env]['master_cert'] and cluster_key == current_state[env]['master_key']:
-                    print("INFO: cluster={} is in sync with master state for current env".format(cluster))
-                    current_state[env]['clusters'][cluster]['matches_master'] = True
-                else:
-                    print("WARN: cluster={} is NOT in sync with master state for current env".format(cluster))
-                    current_state[env]['clusters'][cluster]['matches_master'] = False
+                print(f"WARN: cluster=cluster is NOT in sync with master state for env={env}")
+                current_state[env]['clusters'][cluster]['matches_master'] = True
 
+                #TODO: add more verbose logging to troubleshoot errors with secret_name, cert, & key
 
         ######## (3) Evaluate in-memory state of env in current iteration #######
         # run checks and set env state:
@@ -841,20 +857,18 @@ def enforce_desired_state():
         # 
         if not all([ current_state[env]['all_certs_exist'],
                      current_state[env]['all_certs_valid'],
-                     current_state[env]['all_certs_match'] ]):
-
+                     current_state[env]['all_certs_match']
+        ]):
             # just redeploy all certs from master, until the desired state is reached 
             deploy_targets = []
             
             for cluster in current_state[env]['clusters']:
                 # All 3 cluster conditions ('existing_cert_name','valid_age','matches_master') must evaluate to True,
                 # otherwise the cluster cert will be redeployed using 'master_cert'
-                if all([ current_state[env]['clusters'][cluster]['existing_cert_name'], 
+                if not all([ current_state[env]['clusters'][cluster]['existing_cert_name'], 
                          current_state[env]['clusters'][cluster]['valid_age'], 
-                         current_state[env]['clusters'][cluster]['matches_master'] ]):
-                    pass # do nothing because cluster is fine
-                else:               
-                    # flag cluster for new cert deployment
+                         current_state[env]['clusters'][cluster]['matches_master']
+                ]):
                     deploy_targets.append(cluster)
                             
             for cluster in deploy_targets:
