@@ -586,7 +586,7 @@ def create_uuid(size=6, base64=False) -> str:
     :type: str
     """
 
-    char_set = ascii_lowercase + asciii_uppercase + digits
+    char_set = ascii_lowercase + ascii_uppercase + digits
 
     # enforce alphanumeric chars in UUID: strip any character that does not occur in the set [A-Za-z0-9]
     uuid = ''.join(choices(char_set, k=size))
