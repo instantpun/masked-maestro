@@ -110,22 +110,31 @@ def deploy_cert(cert=None, key=None, secret_name=None, apiserver_url=None, apise
 
     current_state = cfg.current_state
 
-    assert not (from_master and (cert or key)), "func: deploy_cert(), keyword argument 'from_master' cannot be used with arguments 'cert' or 'key'."
-    
+    master_cert = None
+    master_key = None
+
+    assert not (from_master and (cert or key)), "func: deploy_cert(), Arguments Mutually Exclusive [from_master,(cert,key)]: keyword argument 'from_master' cannot be used with keyword arguments 'cert' or 'key'."
+
+    assert env is not None, "func: deploy_cert(), Argument Type Invalid [env]: 'env' cannot be NoneType."
+    #TODO: enforce str() type here or not?
+    assert env, "func: deploy_cert(), Argument Data Invalid [env]: 'env' must match one the corresponding fields in the inventory config."
+    assert current_state, "func: deploy_cert(), State Invalid [current_state]: current_state is None" #TODO: improve messages
+
     if from_master:
-        assert env, "func: deploy_cert(), param: env -- Invalid Param: env must be a non-empty string and match one of the fields in the inventory file"
-        assert current_state, "func: deploy_cert(), param: current_state -- Invalid Param: current_state is empty" # TODO: Need better message"
-        assert current_state.get(env), "func: deploy_cert(), param: current_state -- Missing Dependency: current_state does not contain key '{}'".format(env) # TODO: Need better message"
-        assert current_state[env].get('master_cert') and current_state[env].get('master_key'), "func: deploy_cert() -- Missing Dependency: master_cert or master_key for provided env are not set."
+        assert current_state.get(env), "func: deploy_cert(), State Malformed [current_state]: current_state does not contain key '{}'".format(env) # TODO: Need better message"
+        assert current_state[env].get('master_cert'), "func: deploy_cert(), State Malformed [current_state]: master_cert for provided env is not set."
+        assert current_state[env].get('master_key'), "func: deploy_cert(), State Malformed [current_state]: master_key for provided env is not set."
 
     if not from_master:
-        assert cert and key, "func: deploy_cert(), params: cert, key - Both a plaintext, PEM-formatted certificate and unencrypted key must be provided."
-        assert isinstance(cert, str) and isinstance(key, str), "func: deploy_cert(), params: cert, key - 'cert' and 'key' parameters must be of type str()"
+        assert isinstance(cert, str) , "func: deploy_cert(), Argument Type Invalid [cert,key]: 'cert' must be of type str()"
+        assert isinstance(key, str), "func: deploy_cert(), Argument Type Invalid [cert,key]: 'key' must be of type str()"
+        assert cert, "func: deploy_cert(), Argument Data Invalid [cert]: A plaintext, PEM-formatted certificate must be provided."
+        assert key, "func: deploy_cert(), Argument Data Invalid [key]: A plaintext, unencrypted key must be provided."
     
     if not secret_name:
         secret_name = "sealing-secret-" + create_uuid()
 
-    tls_signer_secret = yaml_file_to_dict('k8s_templates/secret_tls.yaml')
+    tls_signer_secret = yaml_file_to_dict(f'{K8S_TEMPLATE_PATH}/secret_tls.yaml')
     tls_signer_secret['metadata']['name'] = secret_name
 
     # cert must be in standard PEM format, and base64 encoded
