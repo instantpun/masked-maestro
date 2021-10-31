@@ -1,0 +1,10 @@
+<form action="/" method="POST">
+  <p><label for="clusters">Cluster:<label>
+  <select id="clusters" name="cluster">
+    {% for cluster in clusters %}
+    <option value="{{ cluster }}">{{cluster}}</option>
+    {% endfor %}
+  </select></p>
+  <p>String<input type = "test" name = "String" /></p>
+  <p><input type = "submit" value = "Submit" /></p>
+</form>
